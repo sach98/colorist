@@ -63,4 +63,9 @@ jobs:
       - name: Record the build actually tested
         run: ffmpeg -version
       - run: pip install -e ".[dev]"
+        # Master builds report a build number, not a release version, so the
+        # preflight refuses them by default. This lane exists to exercise the
+        # code against them, so it opts in deliberately.
       - run: pytest -v
+        env:
+          COLORIST_ALLOW_UNSUPPORTED_FFMPEG: "1"

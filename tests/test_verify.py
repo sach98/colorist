@@ -641,3 +641,104 @@ def test_severe_but_recoverable_grades_still_authenticate(tmp_path: Path):
     assert clipping["introduced_clipping_percent"] > 20.0
     outcomes = {g["id"]: g["outcome"] for g in report["gates"]}
     assert outcomes["introduced_clipping"] == "FAIL"
+
+
+def _structured_pair(tmp_path: Path) -> tuple[Path, Path]:
+    """A structured source and a genuinely clipping grade of it."""
+    source = tmp_path / "ident-src.mp4"
+    _run_ffmpeg([
+        "-f", "lavfi", "-i", "testsrc2=size=96x64:rate=25:duration=0.32",
+        "-frames:v", "8", "-c:v", "libx264", "-crf", "12", "-pix_fmt", "yuv420p",
+        "-color_range", "tv", "-colorspace", "bt709",
+        "-color_primaries", "bt709", "-color_trc", "bt709", str(source),
+    ])
+    delivery = tmp_path / "ident-delivery.mp4"
+    _run_ffmpeg([
+        "-i", str(source), "-vf", "eq=contrast=3.2:brightness=0.42", "-frames:v", "8",
+        "-c:v", "libx264", "-crf", "12", "-pix_fmt", "yuv420p",
+        "-color_range", "tv", "-colorspace", "bt709",
+        "-color_primaries", "bt709", "-color_trc", "bt709", str(delivery),
+    ])
+    return source, delivery
+
+
+def _clipping_error(delivery: Path, reference: Path) -> str:
+    """Run the clipping path and return the terminal error text."""
+    result = verify_delivery(
+        delivery,
+        H264_PROFILE,
+        load_gates(GATES),
+        None,
+        None,
+        source_reference=reference,
+        source_params=ConvertParams(
+            range="limited", matrix="bt709", transfer="bt709", primaries="bt709"
+        ),
+    )
+    assert result.state == "ERROR"
+    return result.error or ""
+
+
+def test_a_copy_of_the_delivery_is_refused_as_its_own_source(tmp_path: Path):
+    """Path and inode checks cannot see a copy, and rank structure cannot either.
+
+    A byte-for-byte copy has a different path and a different inode, and it
+    correlates with the delivery at exactly 1.0, so it passed authentication.
+    Measured 2026-07-23 before this check: a delivery carrying 26.146 percent
+    introduced clipping against its real source reported 0.0 percent and a
+    PASSING hard gate against a copy of itself. Only the sample values separate
+    the two, and only across every frame, since a grade may touch only frames
+    the authentication sampler skips.
+    """
+    _, delivery = _structured_pair(tmp_path)
+    copy = tmp_path / "copy-of-delivery.mp4"
+    copy.write_bytes(delivery.read_bytes())
+    assert copy.stat().st_ino != delivery.stat().st_ino
+    assert "same pixels as the delivery" in _clipping_error(delivery, copy)
+
+
+def test_a_remux_of_the_delivery_is_refused_as_its_own_source(tmp_path: Path):
+    """A stream copy into another container is still not a pre-grade source."""
+    _, delivery = _structured_pair(tmp_path)
+    remux = tmp_path / "remux-of-delivery.mkv"
+    _run_ffmpeg(["-i", str(delivery), "-c", "copy", str(remux)])
+    assert remux.read_bytes() != delivery.read_bytes()
+    assert "same pixels as the delivery" in _clipping_error(delivery, remux)
+
+
+def test_a_genuine_grade_is_not_mistaken_for_an_identical_file(tmp_path: Path):
+    """The identity bound must not swallow a real, subtle grade.
+
+    Measured 2026-07-23 on encoded 160x96 testsrc2: the mildest grades tried
+    (eq brightness 0.002, contrast 1.01, saturation 1.05) moved sampled luma by
+    0.008984, 0.012437, and 0.012899, all above the 1/255 = 0.003922 bound,
+    while an identical file measures exactly 0.
+    """
+    source = tmp_path / "subtle-src.mp4"
+    _run_ffmpeg([
+        "-f", "lavfi", "-i", "testsrc2=size=96x64:rate=25:duration=0.32",
+        "-frames:v", "8", "-c:v", "libx264", "-crf", "12", "-pix_fmt", "yuv420p",
+        "-color_range", "tv", "-colorspace", "bt709",
+        "-color_primaries", "bt709", "-color_trc", "bt709", str(source),
+    ])
+    delivery = tmp_path / "subtle-delivery.mp4"
+    _run_ffmpeg([
+        "-i", str(source), "-vf", "eq=brightness=0.002", "-frames:v", "8",
+        "-c:v", "libx264", "-crf", "12", "-pix_fmt", "yuv420p",
+        "-color_range", "tv", "-colorspace", "bt709",
+        "-color_primaries", "bt709", "-color_trc", "bt709", str(delivery),
+    ])
+    verify_delivery(
+        delivery,
+        H264_PROFILE,
+        load_gates(GATES),
+        None,
+        None,
+        source_reference=source,
+        source_params=ConvertParams(
+            range="limited", matrix="bt709", transfer="bt709", primaries="bt709"
+        ),
+    )
+    report = json.loads((tmp_path / "report.json").read_text())
+    assert report["clipping"]["available"] is True
+    assert report["clipping"]["max_frame_delta"] > 1.0 / 255.0

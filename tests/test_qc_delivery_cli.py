@@ -371,7 +371,16 @@ def test_qc_cli_grade_introduced_clipping_cannot_return_pass(tmp_path: Path) -> 
     assert authentication["correlation"] >= authentication["threshold"]
     assert authentication["evidence_frames"] == 3
     assert authentication["degenerate_frames"] == 0
-    assert report["clipping"]["introduced_clipped_samples"] == 146800
+    # Assert the BEHAVIOUR, not one build's pixel count. The exact number of
+    # clipped samples depends on the encoder: this fixture measured 146800 on
+    # homebrew ffmpeg 8.1.2 and 143015 on the pinned BtbN 8.1.2 Linux build, a
+    # 2.6 percent spread that says nothing about whether the gate works.
+    clipping = report["clipping"]
+    assert clipping["available"] is True
+    assert clipping["introduced_clipped_samples"] > 0
+    assert clipping["introduced_clipping_percent"] > 10.0
+    outcomes = {gate["id"]: gate["outcome"] for gate in report["gates"]}
+    assert outcomes["introduced_clipping"] == "FAIL"
     assert report["clipping"]["sample_count"] == 230400
     assert report["clipping"]["introduced_clipping_percent"] == pytest.approx(
         63.71527777777778
@@ -474,7 +483,12 @@ def test_qc_cli_mild_grade_authenticates_with_low_clipping(tmp_path: Path) -> No
     assert authentication["correlation"] >= authentication["threshold"]
     assert authentication["evidence_frames"] == 3
     assert authentication["degenerate_frames"] == 0
-    assert report["clipping"]["introduced_clipping_percent"] == 0.0
+    # "Low", not exactly zero. This delivery is a lossily encoded mild grade
+    # whose red channel is lifted 2 percent, so whether any near-white sample
+    # tips over the clip threshold is a property of the encoder's rounding, not
+    # of the behaviour under test. The gate threshold is 0.5 percent; asserting
+    # an order of magnitude under it still fails loudly on a real regression.
+    assert report["clipping"]["introduced_clipping_percent"] < 0.05
     assert _gate(report, "introduced_clipping")["outcome"] == "PASS"
 
 

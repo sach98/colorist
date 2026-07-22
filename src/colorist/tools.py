@@ -41,6 +41,14 @@ REQUIRED_FFMPEG_MAJOR = 8
 REQUIRED_FILTERS = ("scale", "lut3d", "scdet")
 REQUIRED_ENCODERS = ("ffv1",)
 
+#: Opt out of the version gate to try an unsupported build. The capability
+#: checks below still run. This exists because refusing every non-8.x build
+#: outright also refused the project's own advisory CI lane, which tracks
+#: ffmpeg master precisely to catch upstream changes early: a lane that can
+#: never pass reports nothing. Users who want to run a newer release before
+#: this project has been measured on it can make the same trade knowingly.
+ALLOW_UNSUPPORTED_VARIABLE = "COLORIST_ALLOW_UNSUPPORTED_FFMPEG"
+
 
 class PreflightError(RuntimeError):
     """A required external tool is missing, too old, or lacks a capability."""
@@ -69,12 +77,21 @@ def _parse_major(banner: str, path: str) -> int:
     # ffmpeg prints "ffmpeg version 8.1.2", ffprobe prints "ffprobe version 8.1.2",
     # and static builds prefix the number with "n" ("ffmpeg version n8.1.2").
     match = re.search(r"^(?:ffmpeg|ffprobe) version n?(\d+)\.", banner, re.M)
-    if match is None:
+    if match is not None:
+        return int(match.group(1))
+    first = banner.splitlines()[0] if banner else "(no output)"
+    # Master and nightly builds carry a build number instead of a release
+    # version ("ffmpeg version N-125716-g1b1f602699-20260722"), so say that
+    # rather than claiming the output was unrecognizable.
+    if re.search(r"^(?:ffmpeg|ffprobe) version N-", first):
         raise PreflightError(
-            f"{path} did not report a recognizable ffmpeg version. First line: "
-            f"{banner.splitlines()[0] if banner else '(no output)'}"
+            f"{path} is an unversioned development build ({first.split(' Copyright')[0]}). "
+            f"This project is measured on ffmpeg {REQUIRED_FFMPEG_MAJOR}.x releases. "
+            f"Install one, or set {ALLOW_UNSUPPORTED_VARIABLE}=1 to proceed anyway."
         )
-    return int(match.group(1))
+    raise PreflightError(
+        f"{path} did not report a recognizable ffmpeg version. First line: {first}"
+    )
 
 
 def preflight() -> dict[str, str]:
@@ -89,16 +106,19 @@ def preflight() -> dict[str, str]:
     ffmpeg = resolve_tool("ffmpeg")
     ffprobe = resolve_tool("ffprobe")
 
-    for name, path in (("ffmpeg", ffmpeg), ("ffprobe", ffprobe)):
-        major = _parse_major(_tool_banner(path), path)
-        if major != REQUIRED_FFMPEG_MAJOR:
-            raise PreflightError(
-                f"{name} at {path} reports major version {major}, but this project "
-                f"requires ffmpeg {REQUIRED_FFMPEG_MAJOR}.x. Distribution packages are "
-                "often older than that (Ubuntu 24.04 LTS ships 6.1.1). Install an "
-                f"ffmpeg {REQUIRED_FFMPEG_MAJOR} build, or point "
-                f"{OVERRIDE_VARIABLES[name]} at one."
-            )
+    allow_unsupported = bool(os.environ.get(ALLOW_UNSUPPORTED_VARIABLE))
+    if not allow_unsupported:
+        for name, path in (("ffmpeg", ffmpeg), ("ffprobe", ffprobe)):
+            major = _parse_major(_tool_banner(path), path)
+            if major != REQUIRED_FFMPEG_MAJOR:
+                raise PreflightError(
+                    f"{name} at {path} reports major version {major}, but this project "
+                    f"requires ffmpeg {REQUIRED_FFMPEG_MAJOR}.x. Distribution packages are "
+                    "often older than that (Ubuntu 24.04 LTS ships 6.1.1). Install an "
+                    f"ffmpeg {REQUIRED_FFMPEG_MAJOR} build, point "
+                    f"{OVERRIDE_VARIABLES[name]} at one, or set "
+                    f"{ALLOW_UNSUPPORTED_VARIABLE}=1 to proceed anyway."
+                )
 
     listed = subprocess.run(
         [ffmpeg, "-hide_banner", "-filters"], check=True, capture_output=True, text=True

@@ -67,7 +67,11 @@ def test_editable_clone_resolves_repository_presets(tmp_path: Path) -> None:
     ).read_text()
     installed = tmp_path / "editable"
     source = _copy_build_source(tmp_path)
-    build_python = getattr(sys, "_base_executable", sys.executable)
+    # pip must run under an interpreter that can reach the build backend. The base
+    # executable is outside the venv that pip install -e '.[dev]' populated, and
+    # GitHub runners ship no setuptools there, so the isolated build below is
+    # what makes this portable rather than a property of one developer's machine.
+    build_python = sys.executable
     subprocess.run(
         [
             build_python,
@@ -75,7 +79,6 @@ def test_editable_clone_resolves_repository_presets(tmp_path: Path) -> None:
             "pip",
             "install",
             "--no-deps",
-            "--no-build-isolation",
             "--target",
             str(installed),
             "--editable",
@@ -119,7 +122,11 @@ def test_built_wheel_installs_with_bundled_presets(tmp_path: Path) -> None:
     source = _copy_build_source(tmp_path)
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()
-    build_python = getattr(sys, "_base_executable", sys.executable)
+    # pip must run under an interpreter that can reach the build backend. The base
+    # executable is outside the venv that pip install -e '.[dev]' populated, and
+    # GitHub runners ship no setuptools there, so the isolated build below is
+    # what makes this portable rather than a property of one developer's machine.
+    build_python = sys.executable
     built = subprocess.run(
         [
             build_python,
@@ -127,7 +134,6 @@ def test_built_wheel_installs_with_bundled_presets(tmp_path: Path) -> None:
             "pip",
             "wheel",
             "--no-deps",
-            "--no-build-isolation",
             "--wheel-dir",
             str(wheelhouse),
             str(source),

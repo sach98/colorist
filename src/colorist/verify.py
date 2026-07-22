@@ -64,6 +64,14 @@ REFERENCE_AUTHENTICATION_MIN_LUMA_STD = 1.0 / 255.0
 # A 0.60 threshold leaves 0.191576 below the worst genuine case while rejecting
 # the strongest unrelated pair by 0.103349.
 REFERENCE_AUTHENTICATION_THRESHOLD = 0.60
+# A reference that decodes to the delivery's own pixels is not a pre-grade
+# source of it, whatever its path or inode says. A byte-for-byte copy and a
+# stream-copy remux both correlate at exactly 1.0, so rank structure cannot
+# separate them; only the sample values can. Measured 2026-07-23: a delivery
+# carrying 26.146 percent introduced clipping reported 0.0 percent and PASS
+# against a copy of itself. This bound is loose enough that a re-encode of the
+# same frames still trips it, and tight enough that a mild grade does not.
+REFERENCE_IDENTITY_MAX_DELTA = 1.0 / 255.0
 _REC709_LUMA = np.array((0.2126, 0.7152, 0.0722), dtype=np.float64)
 
 
@@ -578,6 +586,18 @@ def _verify_introduced_clipping(
     # Both files are decoded with passthrough timing, so the pairs compared
     # must equal what the containers store. A mismatch means a re-timed
     # decode weighted some frames more than once.
+    # Identity is decided on EVERY frame, not on the authentication sample. A
+    # grade can touch only frames the sampler skipped, so a zero sampled delta
+    # proves nothing; a zero delta across the whole stream proves no grade was
+    # applied, and an ungraded file cannot be the pre-grade source of a grade.
+    if statistics["max_frame_delta"] <= REFERENCE_IDENTITY_MAX_DELTA:
+        raise VerificationError(
+            "source reference decodes to the same pixels as the delivery on every "
+            f"frame (max difference {statistics['max_frame_delta']:.6f} <= "
+            f"{REFERENCE_IDENTITY_MAX_DELTA:.6f}), so it cannot be its pre-grade "
+            "source. A copy, a remux, or an ungraded file measures no "
+            "grade-introduced clipping because no grade was applied."
+        )
     if statistics["frames_compared"] != delivery_frame_count:
         raise VerificationError(
             f"clipping compared {statistics['frames_compared']} frame pairs but the "
@@ -601,6 +621,8 @@ def _reference_authentication_base() -> dict[str, Any]:
         "evidence_frames": 0,
         "degenerate_frames": 0,
         "frame_correlations": [],
+        "max_sample_delta": None,
+        "identity_threshold": REFERENCE_IDENTITY_MAX_DELTA,
     }
 
 
@@ -630,6 +652,7 @@ def _authenticate_source_reference(
     """Compare spatial rank structure on a few small aligned frame rasters."""
     frames = sample_positions(frame_count)
     correlations: list[dict[str, float | int]] = []
+    deltas: list[float] = []
     degenerate_frames = 0
     for frame in frames:
         source_luma = _read_authentication_luma(
@@ -646,6 +669,7 @@ def _authenticate_source_reference(
             degenerate_frames += 1
             continue
         correlation = _spearman_rank_correlation(source_levels, delivery_levels)
+        deltas.append(float(np.max(np.abs(source_luma - delivery_luma))))
         correlations.append({"frame": frame, "correlation": correlation})
 
     result = _reference_authentication_base()
@@ -661,6 +685,7 @@ def _authenticate_source_reference(
         result["correlation"] = float(
             np.median([item["correlation"] for item in correlations])
         )
+        result["max_sample_delta"] = float(np.max(deltas))
     return result
 
 
@@ -839,6 +864,7 @@ def _introduced_clipping_statistics(
 
     sentinel = object()
     frames_compared = 0
+    max_frame_delta = 0.0
     sample_count = 0
     source_clipped_samples = 0
     delivery_clipped_samples = 0
@@ -871,6 +897,9 @@ def _introduced_clipping_statistics(
         # clipping. Collapsing low and high into one mask would treat a
         # source-black, delivery-white sample as pre-existing and miss it.
         introduced = (delivery_low & ~source_low) | (delivery_high & ~source_high)
+        max_frame_delta = max(
+            max_frame_delta, float(np.max(np.abs(source_array - delivery_array)))
+        )
         frames_compared += 1
         sample_count += int(source_array.size)
         source_clipped_samples += int(np.count_nonzero(source_clipped))
@@ -880,6 +909,7 @@ def _introduced_clipping_statistics(
         raise VerificationError("clipping comparison had no frames to compare")
     return {
         "frames_compared": frames_compared,
+        "max_frame_delta": max_frame_delta,
         "sample_count": sample_count,
         "source_clipped_samples": source_clipped_samples,
         "delivery_clipped_samples": delivery_clipped_samples,
