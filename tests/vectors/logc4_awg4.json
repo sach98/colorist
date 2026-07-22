@@ -1,0 +1,41 @@
+{
+  "source": {
+    "title": "ARRI LogC4 Logarithmic Color Space Specification",
+    "publisher": "ARRI",
+    "url": "https://www.arri.com/resource/blob/278790/bea879ac0d041a925bed27a096ab3ec2/2022-05-arri-logc4-specification-data.pdf",
+    "version": "May 2022",
+    "retrieved": "2026-07-19",
+    "sha256": "b8f9f86d12fd756ab1e852be4ad5b027648979b914225bfa63455144cc95baec"
+  },
+  "notes": "Constants quoted from the reference implementation (page 10): a = (2^18 - 16) / 117.45; b = (1023 - 95) / 1023; c = 95 / 1023; s = (7 * ln(2) * 2^(7 - 14*c/b)) / (a*b); t = (2^(14*(-c/b) + 6) - 64) / a. Encode (x >= t): (log2(a*x + 64) - 6) / 14 * b + c; below t the curve is linear through s and t. Decode: (2^(14*(in - c)/b + 6) - 64) / a. Value table quoted from page 11.",
+  "vectors": [
+    {
+      "name": "black0",
+      "code_value_rgb": [0.0929, 0.0929, 0.0929],
+      "expected": {"scene_linear_reflectance": 0.0},
+      "quote": "Relative Scene Linear 0.0 -> ARRI LogC4 0.0929, 0.0929, 0.0929",
+      "page": 11
+    },
+    {
+      "name": "grey18",
+      "code_value_rgb": [0.2784, 0.2784, 0.2784],
+      "expected": {"scene_linear_reflectance": 0.18},
+      "quote": "Relative Scene Linear 0.18 -> ARRI LogC4 0.2784, 0.2784, 0.2784",
+      "page": 11
+    },
+    {
+      "name": "signal_zero",
+      "code_value_rgb": [0.0, 0.0, 0.0],
+      "expected": {"scene_linear_reflectance": -0.0181},
+      "quote": "ARRI LogC4 0.0 -> Relative Scene Linear -0.0181, -0.0181, -0.0181",
+      "page": 11
+    },
+    {
+      "name": "hardware_max",
+      "code_value_rgb": [1.0, 1.0, 1.0],
+      "expected": {"scene_linear_reflectance": 469.8},
+      "quote": "ARRI LogC4 Hardware Max 1.0000 -> Relative Scene Linear 469.80",
+      "page": 11
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "source": {
+    "title": "Technical Summary for S-Gamut3.Cine/S-Log3 and S-Gamut3/S-Log3",
+    "publisher": "Sony Corporation",
+    "url": "https://pro.sony/s3/cms-static-content/uploadfile/06/1237494271406.pdf",
+    "url_note": "Original URL serves HTTP 403 to non-browser clients as of 2026-07-19; fetched from the Internet Archive snapshot of the same URL.",
+    "archive_url": "https://web.archive.org/web/2024id_/https://pro.sony/s3/cms-static-content/uploadfile/06/1237494271406.pdf",
+    "retrieved": "2026-07-19",
+    "sha256": "d9c8a042e7e9e8ee248df97633b645681b5370099a508b6cee97d8bad880d5d3"
+  },
+  "notes": "Formulas quoted from the Appendix (page 6). 'reflection = IRE * 0.9' per the document. Encode: if in >= 0.01125000: out = (420.0 + log10((in + 0.01) / (0.18 + 0.01)) * 261.5) / 1023.0, else out = (in * (171.2102946929 - 95.0)/0.01125000 + 95.0) / 1023.0. Decode: if in >= 171.2102946929/1023.0: out = (10.0 ^ ((in * 1023.0 - 420.0) / 261.5)) * (0.18 + 0.01) - 0.01, else out = (in * 1023.0 - 95.0) * 0.01125000 / (171.2102946929 - 95.0). The document's decode else-branch line contains a typographic 'out +' where 'out =' is meant; recorded verbatim here, interpreted as assignment.",
+  "vectors": [
+    {
+      "name": "black0",
+      "code_value_rgb": [0.09286412512218964, 0.09286412512218964, 0.09286412512218964],
+      "code_value_10bit": 95,
+      "expected": {"scene_linear_reflectance": 0.0, "ire_percent": 3.5},
+      "quote": "0% Black (IRE0%): IRE 3.5%, CV 95 (S-Log3 column)",
+      "page": 6
+    },
+    {
+      "name": "grey18",
+      "code_value_rgb": [0.4105571847507331, 0.4105571847507331, 0.4105571847507331],
+      "code_value_10bit": 420,
+      "expected": {"scene_linear_reflectance": 0.18, "ire_percent": 41},
+      "quote": "18% Grey (IRE20%): IRE 41%, CV 420 (S-Log3 column)",
+      "page": 6
+    },
+    {
+      "name": "white90",
+      "code_value_rgb": [0.5845552297165201, 0.5845552297165201, 0.5845552297165201],
+      "code_value_10bit": 598,
+      "expected": {"scene_linear_reflectance": 0.9, "ire_percent": 61},
+      "quote": "90% White (IRE100%): IRE 61%, CV 598 (S-Log3 column)",
+      "page": 6
+    }
+  ]
+}

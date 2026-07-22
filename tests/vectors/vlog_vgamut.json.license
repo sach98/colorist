@@ -1,0 +1,6 @@
+SPDX-License-Identifier: MIT
+Comment: The associated JSON is MIT-licensed project test data. It quotes short
+ numeric anchors and phrases from the camera manufacturer's own published
+ document for verification; those quotations remain the property of their
+ respective manufacturers and are used here for identification and testing.
+ The source document and retrieval date are recorded inside the JSON.

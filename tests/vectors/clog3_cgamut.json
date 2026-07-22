@@ -1,0 +1,46 @@
+{
+  "source": {
+    "title": "White Paper: Description of the Canon Log, Canon Log 2 and Canon Log 3 Gamma Curves",
+    "publisher": "Canon Inc.",
+    "url": "https://downloads.canon.com/nw/pdfs/camcorders/whitepapers/canon-log-gamma-curves-white-paper.pdf",
+    "version": "November 1st, 2018 edition (per document cover)",
+    "retrieved": "2026-07-19",
+    "sha256": "43354b0601eef8bc2ab12cae0309e62232fc9fba3969c2453f35ba441098a2e0",
+    "extraction_note": "Formulas and the code-value table are embedded as images in the PDF (no text layer); extracted by direct visual reading of pages 8 to 9 rendered at 150dpi, then every value cross-checked against colour-science 0.4.7 log_decoding_CanonLog3 before acceptance. All checks passed within table rounding."
+  },
+  "notes": "Canon Log 3 (Full %) encode, x = Scene Linear %, y = Full Range %: x < -0.014: y = -0.36726845*log10(1 - 14.98325x) + 0.12783901; -0.014 <= x <= 0.014: y = 1.9754798x + 0.12512219; x > 0.014: y = 0.36726845*log10(14.98325x + 1) + 0.12240537. Inverse thresholds: y < 0.097465473 (negative branch), 0.097465473 <= y <= 0.15277891 (linear), y > 0.15277891 (log branch). CONVENTION (document footnote, page 9): reflection = Scene Linear * 0.9, so the table's 20% scene-linear grey is 0.18 reflection; colour-science operates in reflection domain by default and agrees with every table row once the 0.9 factor is applied (verified 2026-07-19: decode(0.343)=0.1794, decode(0.564)=0.8972, decode(0.887)=7.192).",
+  "vectors": [
+    {
+      "name": "black0",
+      "code_value_rgb": [0.125, 0.125, 0.125],
+      "code_value_10bit": 128,
+      "expected": {"scene_linear_reflectance": 0.0},
+      "quote": "Canon Log 3 row: 0% (0% Black) Full % 12.5%, 10bit CV 128",
+      "page": 9
+    },
+    {
+      "name": "grey18",
+      "code_value_rgb": [0.343, 0.343, 0.343],
+      "code_value_10bit": 351,
+      "expected": {"scene_linear_reflectance": 0.18},
+      "quote": "Canon Log 3 row: 20% (18% Grey) Full % 34.3%, 10bit CV 351; reflection = Scene Linear * 0.9",
+      "page": 9
+    },
+    {
+      "name": "white90",
+      "code_value_rgb": [0.564, 0.564, 0.564],
+      "code_value_10bit": 577,
+      "expected": {"scene_linear_reflectance": 0.9},
+      "quote": "Canon Log 3 row: 100% (90% White) Full % 56.4%, 10bit CV 577",
+      "page": 9
+    },
+    {
+      "name": "sl800",
+      "code_value_rgb": [0.887, 0.887, 0.887],
+      "code_value_10bit": 908,
+      "expected": {"scene_linear_reflectance": 7.2},
+      "quote": "Canon Log 3 row: 800% Full % 88.7%, 10bit CV 908",
+      "page": 9
+    }
+  ]
+}

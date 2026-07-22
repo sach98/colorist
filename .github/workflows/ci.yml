@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: MIT
+name: ci
+on: [push, pull_request]
+
+# The conformance lane pins one FFmpeg build and verifies its digest. A floating
+# "latest" master build cannot support a version-specific correctness claim and
+# cannot reproduce a later regression. The optional lane below tracks the moving
+# build and is allowed to fail, so a break there is a signal, not a stoppage.
+#
+# macOS is a known gap: Homebrew serves whatever it serves that day, so the job
+# prints the version it actually tested rather than pretending to pin it.
+env:
+  FFMPEG_LINUX_URL: https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-19-13-12/ffmpeg-n8.1.2-22-g94138f6973-linux64-gpl-8.1.tar.xz
+  FFMPEG_LINUX_SHA256: 166375e7f8b1f6963949a61a83ffffe858eba742f6326180b8ff3bc58b205c72
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+        python-version: ["3.11", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pinned ffmpeg (linux, static build)
+        if: runner.os == 'Linux'
+        run: |
+          curl --fail --show-error --silent --location -o ff.tar.xz "$FFMPEG_LINUX_URL"
+          echo "$FFMPEG_LINUX_SHA256  ff.tar.xz" | sha256sum --check --strict
+          tar xf ff.tar.xz
+          sudo cp ffmpeg-*/bin/ffmpeg ffmpeg-*/bin/ffprobe /usr/local/bin/
+      - name: Install ffmpeg (macos)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - name: Capability assertion
+        run: |
+          ffmpeg -version
+          ffmpeg -hide_banner -buildconf
+          test "$(ffmpeg -hide_banner -filters | grep -cE ' (scale|lut3d|scdet) ')" = "3"
+          test "$(ffmpeg -hide_banner -encoders | grep -c ffv1)" -ge 1
+      - run: pip install -e ".[dev]"
+      - run: pytest -v
+
+  test-latest-ffmpeg:
+    # Advisory only: catches upstream FFmpeg changes early without gating a merge.
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install moving ffmpeg master build
+        run: |
+          curl --fail --show-error --silent --location -o ff.tar.xz \
+            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
+          tar xf ff.tar.xz
+          sudo cp ffmpeg-*/bin/ffmpeg ffmpeg-*/bin/ffprobe /usr/local/bin/
+      - name: Record the build actually tested
+        run: ffmpeg -version
+      - run: pip install -e ".[dev]"
+      - run: pytest -v

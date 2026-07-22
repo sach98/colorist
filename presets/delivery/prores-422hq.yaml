@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: MIT
+container: mov
+vcodec: prores_ks
+pix_fmt: yuv422p10le
+range: limited
+color_primaries: bt709
+color_trc: bt709
+colorspace: bt709
+profile: 3
+acodec: copy
+naming_template: "<stem>.graded.<ext>"

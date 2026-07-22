@@ -1,0 +1,4 @@
+SPDX-License-Identifier: CC0-1.0
+Comment: Self-authored synthetic smoke clip, released to the public domain
+ under CC0 1.0. See tests/assets/ATTRIBUTION.md. Reproduce with
+ tools/make_test_clip.py.

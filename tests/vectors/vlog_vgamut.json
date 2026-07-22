@@ -1,0 +1,38 @@
+{
+  "source": {
+    "title": "V-Log/V-Gamut REFERENCE MANUAL",
+    "publisher": "Panasonic Corporation",
+    "url": "https://pro-av.panasonic.net/en/cinema_camera_varicam_eva/support/pdf/VARICAM_V-Log_V-Gamut.pdf",
+    "version": "November 28, 2014 (Rev.1.0 per document)",
+    "url_note": "The older URL cited in early research (pro-av.panasonic.net/en/varicam/common/pdf/...) now serves an HTML page; this cinema_camera_varicam_eva path serves the PDF as of 2026-07-19.",
+    "retrieved": "2026-07-19",
+    "sha256": "d8a1837725abcca5da348b2dc6f212446db6a598cb61b093891af7ecbc0c8dcc"
+  },
+  "notes": "Encode: out = 5.6*in + 0.125 for in < cut1; out = c*log10(in + b) + d for in >= cut1; cut1 = 0.01, b = 0.00873, c = 0.241514, d = 0.598206 (in = reflection, out = normalized signal). Decode linear branch: out = (in - 0.125) / 5.6. 10-bit code values quoted from the manual: grey 18% reflection = 433, black 0% = 128, white 90% = 602. All three cross-checked against colour-science 0.4.7 log_decoding_VLog on 2026-07-19: deltas 2e-5, 8e-5, 2.6e-3 (white delta is table CV rounding).",
+  "vectors": [
+    {
+      "name": "black0",
+      "code_value_rgb": [0.1251221896383187, 0.1251221896383187, 0.1251221896383187],
+      "code_value_10bit": 128,
+      "expected": {"scene_linear_reflectance": 0.0},
+      "quote": "black output code with reflection of 0% as 128",
+      "page": 3
+    },
+    {
+      "name": "grey18",
+      "code_value_rgb": [0.4232649071358749, 0.4232649071358749, 0.4232649071358749],
+      "code_value_10bit": 433,
+      "expected": {"scene_linear_reflectance": 0.18},
+      "quote": "Gray output code with reflection of 18% is defined as 433",
+      "page": 3
+    },
+    {
+      "name": "white90",
+      "code_value_rgb": [0.5884652981427175, 0.5884652981427175, 0.5884652981427175],
+      "code_value_10bit": 602,
+      "expected": {"scene_linear_reflectance": 0.9},
+      "quote": "white output code with reflection of 90% as 602",
+      "page": 3
+    }
+  ]
+}

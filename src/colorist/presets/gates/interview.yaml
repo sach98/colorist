@@ -1,0 +1,102 @@
+# SPDX-License-Identifier: MIT
+# Shared by consistency and decoded-delivery qc.
+# required_coverage governs absent soft evidence only. Hard evidence is always required.
+# A soft gate whose coverage is NOT listed here is diagnostic: if its evidence is
+# absent the gate reports SKIPPED_ABSENT_EVIDENCE and the run can still PASS. Listing
+# a coverage promotes that absence to INDETERMINATE instead. whites, shadows, and
+# highlights are computable on any footage, so their absence is a real problem and
+# they are required. skin is deliberately optional: legitimate footage (b-roll,
+# landscape, product) contains no faces, and that must not be reported as a defect.
+workflow: [consistency, qc]
+required_coverage:
+  - whites
+  - shadows
+  - highlights
+gates:
+  - id: whites_rb_balance
+    class: soft
+    coverage: whites
+    domain: per-pixel absolute channel difference, 8-bit scale, frozen neutral masks
+    statistic: maximum over regions of the median per-pixel absolute R minus B
+    operator: less_than_or_equal
+    threshold: 4.0
+    evidence_key: whites.r_minus_b
+    rationale: Keep frozen neutral regions free of visible red-blue disagreement.
+    validation_status: unvalidated_example_default
+
+  - id: whites_green_balance
+    class: soft
+    coverage: whites
+    domain: per-pixel absolute channel difference, 8-bit scale, frozen neutral masks
+    statistic: maximum over regions of the median per-pixel absolute G minus the mean of R and B
+    operator: less_than_or_equal
+    threshold: 3.0
+    evidence_key: whites.green_balance
+    rationale: Keep green balanced against the red-blue midpoint in frozen neutral regions.
+    validation_status: unvalidated_example_default
+
+  - id: shadow_floor
+    class: soft
+    coverage: shadows
+    domain: full-range Rec.709 luma, 8-bit scale, sampled source frames
+    statistic: p1 luma
+    operator: greater_than_or_equal
+    threshold: 0.5
+    evidence_key: shadows.p1
+    rationale: Preserve a small interview shadow floor.
+    validation_status: unvalidated_example_default
+
+  - id: highlight_ceiling
+    class: soft
+    coverage: highlights
+    domain: full-range Rec.709 luma, 8-bit scale, sampled source frames
+    statistic: p99 luma
+    operator: less_than_or_equal
+    threshold: 205.0
+    evidence_key: highlights.p99
+    rationale: Keep interview highlights below the episode-derived ceiling.
+    validation_status: unvalidated_example_default
+
+  - id: skin_saturation
+    class: soft
+    coverage: skin
+    domain: HSV saturation percent over frozen skin masks in Rec.709 display code
+    statistic: median HSV saturation percent
+    operator: between_inclusive
+    threshold: [25.0, 38.0]
+    evidence_key: skin.saturation_percent
+    rationale: Keep skin saturation within the interview reference interval.
+    validation_status: unvalidated_example_default
+
+  - id: delivery_range_extrema
+    class: hard
+    coverage: delivery_range
+    domain: decoded delivery Y Cb Cr samples in the declared output range
+    statistic: delivery range extrema valid
+    operator: equals
+    threshold: true
+    evidence_key: delivery.range_extrema_valid
+    rationale: Illegal delivery sample ranges are not waiverable.
+    validation_status: verified_delivery_invariant
+
+  - id: delivery_tags_match
+    class: hard
+    coverage: delivery_tags
+    domain: decoded delivery color metadata tags against the declared output profile
+    statistic: color tag match set
+    operator: equals
+    threshold: true
+    evidence_key: delivery.tags_match
+    rationale: Delivery metadata mismatches are not waiverable.
+    validation_status: verified_delivery_invariant
+
+  - id: introduced_clipping
+    class: hard
+    coverage: introduced_clipping
+    domain: full-range Rec.709 display-code RGB channel samples, full sampled-frame raster frozen as comparison region; clipped at <= 1/255 or >= 254/255
+    statistic: grade-introduced clipping percentage
+    operator: less_than_or_equal
+    threshold: 0.5
+    evidence_key: delivery.introduced_clipping_percent
+    rationale: A grade must not introduce clipping beyond the stated threshold.
+    validation_status: verified_delivery_invariant

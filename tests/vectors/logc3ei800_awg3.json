@@ -1,0 +1,29 @@
+{
+  "source": {
+    "title": "ALEXA Log C Curve - Usage in VFX",
+    "publisher": "ARRI",
+    "author": "Harald Brendel",
+    "url": "https://www.arri.com/resource/blob/31918/66f56e6abb6e5b6553929edf9aa7483e/2017-03-alexa-logc-curve-in-vfx-data.pdf",
+    "version": "March 2017 (per document)",
+    "retrieved": "2026-07-19",
+    "sha256": "348d2761d3b1df259011204c7080ff9cfdc0512b3073f521384794f88fe1b665"
+  },
+  "notes": "Encode: y = (x > cut) ? c*log10(a*x + b) + d : e*x + f. Decode: x = (t > e*cut + f) ? (10^((t - d)/c) - b)/a : (t - f)/e. EI800 parameters from the appendix table (normalized sensor signal to Log C): cut = 0.010591, a = 5.555556, b = 0.052272, c = 0.247190, d = 0.385537, e = 5.367655, f = 0.092809. The document (page with 'signal corresponding to 18% gray') states 18% grey maps to Log C 0.391 = 400/1023. The paper recommends using EI800 parameters for all EIs in VFX exchange. Cross-checked 2026-07-19 against colour-science 0.4.7 log_decoding_ARRILogC3: decode(400/1023) = 0.18000002, exact.",
+  "vectors": [
+    {
+      "name": "grey18",
+      "code_value_rgb": [0.3910068426197458, 0.3910068426197458, 0.3910068426197458],
+      "code_value_10bit": 400,
+      "expected": {"scene_linear_reflectance": 0.18},
+      "quote": "signal corresponding to 18% gray to the Log C value of 0.391, which is 400/1023",
+      "page": 6
+    },
+    {
+      "name": "signal_f_at_zero",
+      "code_value_rgb": [0.092809, 0.092809, 0.092809],
+      "expected": {"scene_linear_reflectance": 0.0},
+      "quote": "EI800 linear-branch intercept f = 0.092809 (x = 0 encodes to y = f)",
+      "page": 10
+    }
+  ]
+}

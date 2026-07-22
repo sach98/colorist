@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: MIT
+container: mp4
+vcodec: libx264
+pix_fmt: yuv420p
+range: limited
+color_primaries: bt709
+color_trc: bt709
+colorspace: bt709
+crf: 18
+maxrate: 16M
+movflags: +faststart
+acodec: copy
+naming_template: "<stem>.graded.<ext>"
