@@ -381,11 +381,12 @@ def test_qc_cli_grade_introduced_clipping_cannot_return_pass(tmp_path: Path) -> 
     assert clipping["introduced_clipping_percent"] > 10.0
     outcomes = {gate["id"]: gate["outcome"] for gate in report["gates"]}
     assert outcomes["introduced_clipping"] == "FAIL"
+    # sample_count is geometry (160 x 96 x 3 channels x 5 frames), not encoder
+    # output, so it is safe to pin. The percentage is the same encoder-dependent
+    # quantity as the sample count above, expressed differently: it measured
+    # 63.715 percent on homebrew and 62.072 percent on the pinned BtbN Linux
+    # build, so it is covered by the behavioural bound above, not pinned here.
     assert report["clipping"]["sample_count"] == 230400
-    assert report["clipping"]["introduced_clipping_percent"] == pytest.approx(
-        63.71527777777778
-    )
-    assert _gate(report, "introduced_clipping")["outcome"] == "FAIL"
 
 
 @pytest.mark.parametrize("reference_kind", ["path", "symlink", "hardlink"])
