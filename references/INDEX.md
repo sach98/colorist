@@ -15,6 +15,7 @@ One line per file. Load only what the task needs. Evidence tags used throughout:
 - color-difference.md: delta E variants, prerequisites, interpretation bands, engineer vs perceptual units.
 - uniform-spaces-for-grading.md: measured hue linearity of Oklab/CAM16-UCS/Jzazbz/ICtCp/IPT/CIELAB against the Munsell renotation, overall and in the skin hue families.
 - white-balance-accuracy-measured.md: measured dE2000 cost of v1's channel-gain white balance against von Kries/Bradford/CAT02/CAT16, on an analytically known chart.
+- ../references/corpus-manifest.yaml: the Tier A corpus manifest, digests of each item's analytic render with its development or held-out split.
 - skin-targets-measured.md: the vectorscope skin line is NOT the NTSC I axis but does match measured skin; Oklab skin hue and chroma targets across four skin categories and six illuminants.
 
 ## industry-standards (the live-research pillar; numbers here are dated and perishable)

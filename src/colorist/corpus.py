@@ -1608,3 +1608,152 @@ def render_soft(scene: SoftScene) -> np.ndarray:
         accumulated += weight[..., None] * linear_by_label[label]
     # Clip once, after the sum, because the sum is the physical quantity.
     return bt1886_encode(np.clip(accumulated, 0.0, 1.0))
+
+
+# ---------------------------------------------------------------------------
+# The catalogue.
+#
+# Up to here this module is a toolkit. A corpus is a NAMED SET with an
+# identifiable content, a stated split, and expected values that are shipped
+# rather than recomputed.
+#
+# WHY THE EXPECTED VALUES ARE SERIALISED AND NOT RECOMPUTED
+#
+# Specification section 8.1 requires it, and the reason is worth stating: an
+# expectation recomputed from the installed library at test time cannot detect a
+# change in the installed library. colour-science ships the spectra, the observer
+# and the colour space definitions this corpus is built from. If any of those
+# changed in a future release, a recomputing corpus would quietly agree with the
+# new values and every downstream number would move with no test failing.
+#
+# So the manifest carries a digest of each item's analytic render, and a test
+# recomputes and compares. A dependency change then shows up as a failed test
+# naming the item, which is the honest outcome.
+#
+# WHY THERE IS A HELD-OUT SPLIT
+#
+# Validation property 10 needs content the metric has not seen, and property 11
+# forbids reading labels at evaluation time. Neither is enforceable while every
+# item is available to everyone at all times. The split is declared here so a
+# harness can be given the development items and judged on the held-out ones.
+#
+# NO RENDERED MEDIA IS SHIPPED. Each item records the parameters that reproduce
+# it exactly, which is what makes a digest meaningful rather than decorative.
+# ---------------------------------------------------------------------------
+
+SPLITS: Final[tuple[str, ...]] = ("development", "held_out")
+
+
+@dataclass(frozen=True)
+class CorpusItem:
+    """One named corpus item, reproducible from its parameters alone."""
+
+    name: str
+    split: str
+    scene: Scene | SoftScene
+    defects: tuple[tuple[str, float, str], ...] = ()
+    note: str = ""
+
+    def __post_init__(self) -> None:
+        if self.split not in SPLITS:
+            raise CorpusError(f"unknown split {self.split!r}, expected one of {SPLITS}")
+
+
+def render_item(item: CorpusItem) -> np.ndarray:
+    """Render an item's analytic display code, defects included."""
+    base = (
+        render_soft(item.scene)
+        if isinstance(item.scene, SoftScene)
+        else render(item.scene)
+    )
+    return inject_many(base, item.defects) if item.defects else base
+
+
+def item_digest(item: CorpusItem) -> str:
+    """SHA-256 of the item's analytic render, quantised to 16 bits.
+
+    Quantised rather than taken over raw float bytes: a float digest would change
+    on any last-bit difference in a library's arithmetic, which would make the
+    manifest fail for reasons nobody cares about. Sixteen bits is far finer than
+    any difference this corpus is meant to detect and coarse enough not to trip
+    on rounding.
+    """
+    import hashlib
+
+    values = np.rint(np.clip(render_item(item), 0.0, 1.0) * 65535.0).astype("<u2")
+    return "sha256:" + hashlib.sha256(values.tobytes()).hexdigest()
+
+
+def catalogue() -> tuple[CorpusItem, ...]:
+    """The named Tier A items, covering every defect family in the specification."""
+    grid = ChartLayout(rows=4, columns=6, patch_size=48, gutter=8, margin=16)
+    shuffled = ChartLayout(
+        rows=4, columns=6, patch_size=48, gutter=8, margin=16,
+        order=tuple(reversed(range(24))),
+    )
+    soft = SoftScene(
+        materials=(
+            Material("light skin", "face", (96.0, 80.0), 34.0, ((3, 0.16, 0.4), (5, 0.07, 1.1))),
+            Material("white 9.5 (.05 D)", "shirt", (170.0, 120.0), 40.0, ((2, 0.22, 2.0),)),
+        )
+    )
+    return (
+        CorpusItem("reference", "development", Scene(layout=grid),
+                   note="the D65 reference every other development item is judged against"),
+        CorpusItem("d1-tungsten", "development", Scene(layout=grid, illuminant="A"),
+                   note="D1: camera left on daylight under tungsten"),
+        CorpusItem("d1-fluorescent", "development", Scene(layout=grid, illuminant="FL11"),
+                   note="D1: a narrow-band source, where a skin hue target does not apply"),
+        CorpusItem("d2-mixed-light", "development",
+                   Scene(layout=grid, illuminant="D65", second_illuminant="A",
+                         split_at=split_through_cell(grid, 8)),
+                   note="D2: one object lit two ways. No global correction can fix it"),
+        CorpusItem("d3-tone", "development", Scene(layout=grid),
+                   defects=(("tone", 0.75, "primary"),),
+                   note="D3: black lifted and highlights crushed"),
+        CorpusItem("d4-chroma", "development", Scene(layout=grid),
+                   defects=(("chroma", 0.75, "primary"),),
+                   note="D4: chroma scaled down"),
+        CorpusItem("d5-hue", "development", Scene(layout=grid),
+                   defects=(("hue", 0.75, "primary"),),
+                   note="D5: hue rotated"),
+        CorpusItem("combined-tone-chroma", "development", Scene(layout=grid),
+                   defects=(("tone", 0.5, "primary"), ("chroma", 0.5, "primary")),
+                   note="two defects at once; the order is part of the item"),
+        # Held out: a different chart, a different layout order, the SECOND
+        # injector, and content that is not a chart at all. Each axis is one a
+        # metric fitted to the development set cannot interpolate.
+        CorpusItem("heldout-reference-babelcolor", "held_out",
+                   Scene(chart="BabelColor Average", layout=shuffled),
+                   note="held out: a different ColorChecker dataset and a shuffled order"),
+        CorpusItem("heldout-d4-secondary-injector", "held_out",
+                   Scene(chart="BabelColor Average", layout=shuffled),
+                   defects=(("chroma", 0.75, "secondary"),),
+                   note="held out: the independently written injector"),
+        CorpusItem("heldout-d5-secondary-injector", "held_out",
+                   Scene(chart="BabelColor Average", layout=shuffled),
+                   defects=(("hue", 0.75, "secondary"),),
+                   note="held out: the independently written injector"),
+        CorpusItem("heldout-soft-reference", "held_out", soft,
+                   note="held out: not a chart. No rectangles and no uniform regions"),
+        CorpusItem("heldout-soft-d4", "held_out", soft,
+                   defects=(("chroma", 0.75, "secondary"),),
+                   note="held out: non-chart content and the second injector at once"),
+    )
+
+
+def manifest() -> dict[str, Any]:
+    """The catalogue with its digests, ready to serialise."""
+    return {
+        "schema": "colorist/corpus-manifest/v1",
+        "items": [
+            {
+                "name": item.name,
+                "split": item.split,
+                "defects": [list(defect) for defect in item.defects],
+                "analytic_digest": item_digest(item),
+                "note": item.note,
+            }
+            for item in catalogue()
+        ],
+    }

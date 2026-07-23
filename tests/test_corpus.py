@@ -27,12 +27,14 @@ from colorist.corpus import (
     GRAIN_AMPLITUDE_CODES,
     ChartLayout,
     CorpusError,
+    CorpusItem,
     Material,
     Scene,
     SoftScene,
     active_aperture,
     add_grain,
     add_letterbox,
+    catalogue,
     clipping_report,
     delivery_interior_mask,
     equal_distance_pair,
@@ -41,6 +43,7 @@ from colorist.corpus import (
     inject,
     inject_many,
     illuminant_map,
+    item_digest,
     invert,
     masked_statistic,
     measure_delivery_floor,
@@ -1440,3 +1443,89 @@ def test_soft_scenes_refuse_unknown_patches() -> None:
                 )
             )
         )
+
+
+# ---------------------------------------------------------------------------
+# The catalogue and its shipped manifest.
+# ---------------------------------------------------------------------------
+
+
+def _shipped_manifest() -> dict:
+    import yaml
+
+    return yaml.safe_load(
+        (Path(__file__).parents[1] / "references/corpus-manifest.yaml").read_text()
+    )
+
+
+def test_the_shipped_manifest_still_describes_what_the_catalogue_produces() -> None:
+    """The test that turns a silent dependency change into a named failure.
+
+    An expectation recomputed at test time cannot detect a change in the library
+    it recomputes from. colour-science supplies the spectra, the observer, and
+    the colour space definitions this corpus is built from; if any of those moved
+    in a future release, a recomputing corpus would quietly agree with the new
+    values and every downstream number would shift with nothing failing.
+
+    So the digests are shipped and this recomputes them. A failure here means
+    either the catalogue was changed on purpose, in which case regenerate with
+    tools/write_corpus_manifest.py, or a dependency moved underneath the project,
+    in which case regenerating would be hiding exactly what this exists to show.
+    """
+    shipped = _shipped_manifest()
+    assert shipped["schema"] == "colorist/corpus-manifest/v1"
+
+    recomputed = {item.name: item_digest(item) for item in catalogue()}
+    assert {entry["name"] for entry in shipped["items"]} == set(recomputed)
+
+    drifted = [
+        entry["name"]
+        for entry in shipped["items"]
+        if entry["analytic_digest"] != recomputed[entry["name"]]
+    ]
+    assert not drifted, (
+        f"analytic digests moved for {drifted}. Either the catalogue changed on "
+        "purpose, or a dependency moved. Do not regenerate without knowing which."
+    )
+
+
+def test_the_catalogue_covers_every_defect_family_in_the_specification() -> None:
+    names = {item.name for item in catalogue()}
+    for expected in ("reference", "d1-tungsten", "d2-mixed-light", "d3-tone", "d4-chroma", "d5-hue"):
+        assert expected in names, f"the corpus has no {expected} item"
+
+
+def test_the_held_out_split_varies_axes_a_fitted_metric_cannot_interpolate() -> None:
+    """A split is only held out if it differs in kind, not just in parameters.
+
+    Held-out SEVERITIES are interpolable by anything that has learned the
+    generator. These items vary the chart dataset, the layout order, the defect
+    implementation, and whether the content is a chart at all.
+    """
+    items = {item.name: item for item in catalogue()}
+    held_out = [item for item in catalogue() if item.split == "held_out"]
+    assert len(held_out) >= 4
+
+    # A different chart dataset and a shuffled layout.
+    reference_held = items["heldout-reference-babelcolor"]
+    assert reference_held.scene.chart == "BabelColor Average"
+    assert reference_held.scene.layout.order != ()
+
+    # The independently written injector.
+    assert any(
+        defect[2] == "secondary" for item in held_out for defect in item.defects
+    ), "no held-out item uses the second injector"
+
+    # Content that is not a chart.
+    assert any(isinstance(item.scene, SoftScene) for item in held_out)
+
+
+def test_every_item_is_reproducible_from_its_parameters_alone() -> None:
+    """No rendered media is shipped, so the parameters must be sufficient."""
+    for item in catalogue():
+        assert item_digest(item) == item_digest(item)
+
+
+def test_an_unknown_split_is_refused() -> None:
+    with pytest.raises(CorpusError, match="unknown split"):
+        CorpusItem("x", "training", Scene(layout=_grid()))

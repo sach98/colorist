@@ -1,0 +1,111 @@
+# SPDX-License-Identifier: CC-BY-4.0
+#
+# The Tier A corpus manifest.
+#
+# Digests are of each item's ANALYTIC render, quantised to 16 bits, not of any
+# file. No rendered media is shipped: each item is reproducible from the
+# parameters in corpus.catalogue(), and the digest is what makes that
+# reproducibility checkable.
+#
+# WHY THIS IS SHIPPED RATHER THAN RECOMPUTED
+#
+# An expectation recomputed from the installed library at test time cannot detect
+# a change in the installed library. colour-science supplies the spectra, the
+# observer, and the colour space definitions this corpus is built from. Were any
+# of those to change in a future release, a recomputing corpus would quietly
+# agree with the new values and every downstream number would move with no test
+# failing. tests/test_corpus.py recomputes these digests and compares, so a
+# dependency change surfaces as a failure naming the item.
+#
+# Regenerate with:  .venv/bin/python tools/write_corpus_manifest.py
+schema: colorist/corpus-manifest/v1
+items:
+- name: reference
+  split: development
+  defects: []
+  analytic_digest: sha256:8821198f932d1c886c74127d3c5c57b8f6f7ca8b43ce0f73ce609e42c6ae9d94
+  note: the D65 reference every other development item is judged against
+- name: d1-tungsten
+  split: development
+  defects: []
+  analytic_digest: sha256:7dc1bf232da63f20102160b89f5d9789ffc14bd9b464bba9018c9e156fbd9201
+  note: 'D1: camera left on daylight under tungsten'
+- name: d1-fluorescent
+  split: development
+  defects: []
+  analytic_digest: sha256:9958c4f4958ed9813f75b40c1d0993e37d6ab2988b375c86d6e5b828d7d30789
+  note: 'D1: a narrow-band source, where a skin hue target does not apply'
+- name: d2-mixed-light
+  split: development
+  defects: []
+  analytic_digest: sha256:a2ef022b430ed816536c18c1bd5632e084fe5d4f6a58cd758b99aaef15c8460a
+  note: 'D2: one object lit two ways. No global correction can fix it'
+- name: d3-tone
+  split: development
+  defects:
+  - - tone
+    - 0.75
+    - primary
+  analytic_digest: sha256:32ab25d35451619f3a1aceb03c351fb4d2db149773fe71a2ff754d2393d43000
+  note: 'D3: black lifted and highlights crushed'
+- name: d4-chroma
+  split: development
+  defects:
+  - - chroma
+    - 0.75
+    - primary
+  analytic_digest: sha256:d835e78020be11085961ec40b0f9dc180bc1dead1cd55df94e1691cfc3b1051b
+  note: 'D4: chroma scaled down'
+- name: d5-hue
+  split: development
+  defects:
+  - - hue
+    - 0.75
+    - primary
+  analytic_digest: sha256:572341c006bbf38c31df3c6b1b74d50a31367b88250e65ed3b8fcaebca5be4b0
+  note: 'D5: hue rotated'
+- name: combined-tone-chroma
+  split: development
+  defects:
+  - - tone
+    - 0.5
+    - primary
+  - - chroma
+    - 0.5
+    - primary
+  analytic_digest: sha256:195973f4f2db4e947b01fd9e2b4905981bd1fdddb194157ea940ef6b75a15ddd
+  note: two defects at once; the order is part of the item
+- name: heldout-reference-babelcolor
+  split: held_out
+  defects: []
+  analytic_digest: sha256:db454b05549338e464a3c5e395b07a3dc8ac17a5204e45678170db19aa4e9682
+  note: 'held out: a different ColorChecker dataset and a shuffled order'
+- name: heldout-d4-secondary-injector
+  split: held_out
+  defects:
+  - - chroma
+    - 0.75
+    - secondary
+  analytic_digest: sha256:8a0a32271381547e242ccbfb3d226c3f00dfefe538c98b8be1a26b4840175443
+  note: 'held out: the independently written injector'
+- name: heldout-d5-secondary-injector
+  split: held_out
+  defects:
+  - - hue
+    - 0.75
+    - secondary
+  analytic_digest: sha256:90ed212f0487314a8f37cee88aae464316f1d0a2f11f311d6341b59165ba8e95
+  note: 'held out: the independently written injector'
+- name: heldout-soft-reference
+  split: held_out
+  defects: []
+  analytic_digest: sha256:ce3e881b4ac55ef7027aa64ba6ff6d081c14a1f49152cc9a7d0b5436b08faefb
+  note: 'held out: not a chart. No rectangles and no uniform regions'
+- name: heldout-soft-d4
+  split: held_out
+  defects:
+  - - chroma
+    - 0.75
+    - secondary
+  analytic_digest: sha256:d851e5aeac2cda85933d8ee842b0415d3819aead778f720ce38dd513f42de1ae
+  note: 'held out: non-chart content and the second injector at once'
