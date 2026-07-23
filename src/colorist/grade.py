@@ -538,8 +538,21 @@ def _concat_mezzanines(concat_list: Path, destination: Path) -> None:
 
 
 def _encode_delivery(
-    mezzanine: Path, source: Path, destination: Path, profile: DeliveryProfile
+    mezzanine: Path,
+    source: Path | None,
+    destination: Path,
+    profile: DeliveryProfile,
 ) -> None:
+    """Perform the single profile-driven mezzanine-to-delivery encode.
+
+    ``source`` supplies the audio stream and the container metadata a real grade
+    carries over from the file it graded. A synthetic item has neither, so it
+    passes None and the second input, ``-map 1:a?`` and ``-map_metadata 1`` are
+    omitted. Every codec flag, every colour tag, and the libx264 VUI workaround
+    are unchanged either way, which is the point: a corpus delivery has to be
+    encoded by THIS code rather than by a second copy of the same flags that can
+    drift out of step with it.
+    """
     vf = (
         "scale=in_range=pc:out_range="
         f"{profile.ffmpeg_range}:in_color_matrix={profile.colorspace}:"
@@ -554,14 +567,16 @@ def _encode_delivery(
         "-y",
         "-i",
         str(mezzanine),
-        "-i",
-        str(source),
+    ]
+    if source is not None:
+        args += ["-i", str(source)]
+    args += [
         "-map",
         "0:v:0",
-        "-map",
-        "1:a?",
-        "-map_metadata",
-        "1",
+    ]
+    if source is not None:
+        args += ["-map", "1:a?", "-map_metadata", "1"]
+    args += [
         "-vf",
         vf,
         "-c:v",

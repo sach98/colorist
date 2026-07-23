@@ -18,6 +18,8 @@ than as colour-science derives it.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -35,6 +37,7 @@ from colorist.corpus import (
     illuminant_map,
     invert,
     masked_statistic,
+    measure_delivery_floor,
     patch_display_rgb,
     patch_map,
     predicted_quantisation_ceiling,
@@ -42,6 +45,7 @@ from colorist.corpus import (
     reference_roi,
     severity_for_distance,
     split_through_cell,
+    write_delivery,
     write_scene,
     render,
 )
@@ -1071,3 +1075,126 @@ def test_combined_defects_do_not_commute_and_the_order_is_part_of_the_item() -> 
 def test_frame_distance_refuses_mismatched_shapes() -> None:
     with pytest.raises(CorpusError, match="same shape"):
         frame_distance(np.zeros((4, 4, 3)), np.zeros((5, 4, 3)))
+
+
+# ---------------------------------------------------------------------------
+# The delivery leg, end to end.
+# ---------------------------------------------------------------------------
+
+H264 = Path("presets/delivery/h264-yt-sdr.yaml")
+PRORES = Path("presets/delivery/prores-422hq.yaml")
+
+
+def _delivery_layout() -> ChartLayout:
+    # Larger patches than the other tests use: a delivery is 4:2:0 or 4:2:2 and
+    # a 16 pixel patch leaves too little interior once its edges are eroded.
+    return ChartLayout(rows=4, columns=6, patch_size=48, gutter=8, margin=16)
+
+
+@pytest.mark.parametrize(
+    ("profile", "suffix", "pix_fmt"),
+    [(H264, "mp4", "yuv420p"), (PRORES, "mov", "yuv422p10le")],
+)
+def test_a_corpus_delivery_is_encoded_by_the_shipping_encoder(
+    tmp_path, profile, suffix, pix_fmt
+) -> None:
+    """It must be the real delivery, not the carrier with a new name."""
+    import json
+    import subprocess
+
+    from colorist.tools import resolve_tool
+
+    layout = _delivery_layout()
+    reference = render(Scene(layout=layout))
+    carrier = write_scene(reference, tmp_path / "carrier.mkv")
+    delivery = write_delivery(carrier, tmp_path / f"delivery.{suffix}", profile)
+
+    stream = json.loads(
+        subprocess.run(
+            [
+                resolve_tool("ffprobe"), "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=pix_fmt,color_range,color_space",
+                "-of", "json", str(delivery),
+            ],
+            capture_output=True, text=True, check=True,
+        ).stdout
+    )["streams"][0]
+
+    assert stream["pix_fmt"] == pix_fmt
+    assert stream["color_range"] == "tv"
+    assert stream["color_space"] == "bt709"
+
+
+@pytest.mark.parametrize(("profile", "suffix"), [(H264, "mp4"), (PRORES, "mov")])
+def test_the_delivery_floor_is_the_right_size_against_a_derived_ceiling(
+    tmp_path, profile, suffix
+) -> None:
+    """Checked against a bound that did not come from the file.
+
+    Measured: h264 1.7567 against a ceiling of 1.6384, ratio 1.07; prores 0.8057
+    against 0.4096, ratio 1.97. The ceiling covers quantisation only and not each
+    codec's own lossy DCT, so the band is wide and honest rather than a fitted
+    multiplier. It still does its job: a range mistake costs about 16 code
+    values, ten to forty times the ceiling, and cannot hide inside this band.
+    """
+    layout = _delivery_layout()
+    reference = render(Scene(layout=layout))
+    carrier = write_scene(reference, tmp_path / "carrier.mkv")
+    delivery = write_delivery(carrier, tmp_path / f"delivery.{suffix}", profile)
+
+    floor = measure_delivery_floor(reference, delivery, layout, profile)
+
+    assert 0.5 < floor.patch_median_max / floor.ceiling < 2.5
+    # The whole frame is far worse than the patch medians, which is why no
+    # per-pixel expectation is offered for a subsampled delivery.
+    assert floor.whole_frame_max > 20 * floor.patch_median_max
+    assert 0.4 < floor.excluded_fraction < 0.6
+
+
+def test_the_floor_is_measured_against_the_analytic_truth_not_against_a_file(
+    tmp_path,
+) -> None:
+    """The check that catches validating a file against a file.
+
+    The carrier round trip is about 0.019 of an 8-bit code value, one part in
+    sixty of the delivery floor, so swapping the analytic array for a decode of
+    the carrier would move every reported number below the third decimal and no
+    other test would notice. Offsetting the analytic array by a known constant
+    must move the floor by that constant; a function ignoring its analytic
+    argument fails immediately.
+    """
+    layout = _delivery_layout()
+    reference = render(Scene(layout=layout))
+    carrier = write_scene(reference, tmp_path / "carrier.mkv")
+    delivery = write_delivery(carrier, tmp_path / "delivery.mp4", H264)
+
+    honest = measure_delivery_floor(reference, delivery, layout, H264)
+    offset = 4.0 / 255.0
+    shifted = measure_delivery_floor(
+        np.clip(reference + offset, 0.0, 1.0), delivery, layout, H264
+    )
+
+    assert shifted.patch_median_max > honest.patch_median_max + 3.0
+
+
+def test_the_delivery_floor_does_not_depend_on_edge_erosion(tmp_path) -> None:
+    """A finding, pinned: this error is a per-patch bias, not a boundary effect.
+
+    The design this replaced treated the patch median error as boundary
+    contamination to be eroded away, and swept the margin to find where it
+    plateaus. It does not plateau because it never varies: identical at margins
+    of 0, 1, 2, 4, 8 and 12. Erosion is still right for declining to offer a
+    per-pixel expectation, but it is not what sets this number.
+    """
+    layout = _delivery_layout()
+    reference = render(Scene(layout=layout))
+    carrier = write_scene(reference, tmp_path / "carrier.mkv")
+    delivery = write_delivery(carrier, tmp_path / "delivery.mp4", H264)
+
+    readings = {
+        margin: measure_delivery_floor(
+            reference, delivery, layout, H264, edge_margin=margin
+        ).patch_median_max
+        for margin in (0, 2, 4, 8)
+    }
+    assert max(readings.values()) - min(readings.values()) < 0.3, readings

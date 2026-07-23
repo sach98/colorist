@@ -1061,13 +1061,31 @@ def predicted_quantisation_ceiling(pix_fmt: str, video_range: str) -> float:
         h264-yt-sdr, 8 bit limited     ceiling 1.6384, observed 1.1539, ratio 0.70
         prores-422hq, 10 bit limited   ceiling 0.4096, observed 0.4136, ratio 1.01
 
-    **The bound is quantisation only and ProRes exceeds it by one percent.** That
-    residual is chroma subsampling, which averages neighbouring samples and is
-    not in this model. So this is a scale check, not a hard bound, and a caller
-    should assert the observed floor is the right SIZE rather than strictly
-    under. That still catches the failure worth catching: a range mistake costs
-    the 255/219 expansion, roughly 16 code values, which is an order of magnitude
-    away and impossible to miss.
+    **This is a scale reference, not a hard bound, and both shipped profiles
+    exceed it.** Measured on this machine with the shipping encoder:
+
+        h264-yt-sdr    ceiling 1.6384, observed 1.7567, ratio 1.07
+        prores-422hq   ceiling 0.4096, observed 0.8057, ratio 1.97
+
+    The model covers one half code step of Y and chroma rounding propagated
+    through the matrix. What it does not cover is each codec's own lossy DCT
+    quantisation, and the two profiles differ in how much of that they add, which
+    is why one ratio is near unity and the other near two. A single multiplier
+    would be a fitted number wearing a derivation, so none is offered.
+
+    What the ceiling IS good for is the thing it was introduced to do: give a
+    bound that did not come from the file, so a measurement can be checked
+    against something other than itself. The failure worth catching is a range
+    mistake, which costs the 255/219 expansion, roughly 16 code values. That is
+    ten times the 8-bit ceiling and forty times the 10-bit one, so it cannot hide
+    as codec noise whichever profile is in use.
+
+    One measured fact that surprised the design this replaced: the patch median
+    error is INDEPENDENT of how far patch edges are eroded, identical at margins
+    of 0, 1, 2, 4, 8 and 12 pixels, and identical on the IDR frame and a P frame.
+    It is a uniform per-patch bias, not a boundary artefact, so edge erosion is
+    the right way to avoid claiming a per-pixel expectation but is not what sets
+    this number.
     """
     depth = _pix_fmt_bit_depth(pix_fmt)
     full = (1 << depth) - 1
@@ -1219,4 +1237,119 @@ def equal_distance_pair(
         inject(reference, first, severities[0], injector=injector),
         inject(reference, second, severities[1], injector=injector),
         severities,
+    )
+
+
+@dataclass(frozen=True)
+class DeliveryFloor:
+    """What the codec cost this item, measured at build time.
+
+    Nothing here is a stored constant or a tolerance carried over from another
+    run. Every field is measured for the item it belongs to, so there is no
+    number that can go stale when ffmpeg changes underneath the project.
+
+    ``patch_median_max`` is the figure that matters. A per-pixel comparison
+    against the analytic truth on a subsampled delivery is a category error, not
+    a strict measurement, because boundary pixels carry colour from two patches.
+    ``whole_frame_max`` is reported anyway, and is large, precisely so that the
+    difference between the two is visible rather than asserted.
+
+    ``ceiling`` is derived from the profile by predicted_quantisation_ceiling and
+    is the only number here that did NOT come from the file. It is what makes the
+    measurement checkable rather than self-confirming.
+    """
+
+    profile_name: str
+    pix_fmt: str
+    video_range: str
+    whole_frame_max: float
+    interior_pixel_max: float
+    patch_median_max: float
+    ceiling: float
+    excluded_fraction: float
+
+
+def write_delivery(carrier: Path, destination: Path, profile: Any) -> Path:
+    """Encode a carrier to a delivery through the shipping encoder, ungraded.
+
+    Uses grade's own encode rather than a second copy of its flags, so a corpus
+    delivery cannot drift out of step with a real one. No LUT is applied: an
+    identity correction would still cost tetrahedral interpolation error, and
+    that would land in the same number as the codec error with no way to separate
+    them, which defeats the point of measuring the codec leg at all.
+
+    The file is not named through the profile's naming template. That template
+    produces "<stem>.graded.<ext>", and calling an ungraded pass-through file
+    graded would be a false statement in a filename.
+    """
+    from colorist.grade import _encode_delivery, _finalize_delivery_tags, _load_delivery_profile
+
+    resolved = _load_delivery_profile(profile)
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    _encode_delivery(Path(carrier), None, destination, resolved)
+    return _finalize_delivery_tags(destination, resolved)
+
+
+def measure_delivery_floor(
+    analytic: np.ndarray,
+    delivery: Path,
+    layout: ChartLayout,
+    profile: Any,
+    *,
+    frame: int = 1,
+    edge_margin: int = 2,
+) -> DeliveryFloor:
+    """Measure what the delivery encode cost, against the ANALYTIC truth.
+
+    Against the analytic array, never against the carrier. The carrier round trip
+    is roughly 0.019 of an 8-bit code value, about one part in sixty of the
+    delivery floor, so substituting it would change every reported number below
+    the third decimal and nothing would notice. The corpus would then be
+    validating a file against a file, which is the thing this project says it
+    does not do. tests/test_corpus.py pins that by offsetting the analytic array
+    and asserting the floor moves with it.
+    """
+    from colorist.grade import _load_delivery_profile
+    from colorist.render import ConvertParams, read_frame_rgb
+
+    resolved = _load_delivery_profile(profile)
+    decoded = read_frame_rgb(
+        Path(delivery),
+        frame,
+        ConvertParams(
+            range=resolved.range,
+            matrix=resolved.colorspace,
+            transfer=resolved.color_trc,
+            primaries=resolved.color_primaries,
+        ),
+    )
+    truth = np.clip(np.asarray(analytic, dtype=np.float64), 0.0, 1.0)
+    if decoded.shape != truth.shape:
+        raise CorpusError("the delivery and the analytic truth differ in shape")
+
+    error = np.abs(decoded - truth) * 255.0
+    interior = delivery_interior_mask(layout, edge_margin=edge_margin)
+
+    medians = []
+    for cell in range(layout.cells):
+        x0, y0, x1, y1 = layout.rect(cell)
+        block = interior[y0:y1, x0:x1]
+        if not block.any():
+            continue
+        patch = np.abs(
+            np.median(decoded[y0:y1, x0:x1][block], axis=0)
+            - np.median(truth[y0:y1, x0:x1][block], axis=0)
+        )
+        medians.append(float(patch.max()) * 255.0)
+
+    return DeliveryFloor(
+        profile_name=Path(str(profile)).stem if not hasattr(profile, "pix_fmt") else "profile",
+        pix_fmt=resolved.pix_fmt,
+        video_range=resolved.range,
+        whole_frame_max=float(error.max()),
+        interior_pixel_max=float(error[interior].max()),
+        patch_median_max=max(medians) if medians else float("nan"),
+        ceiling=predicted_quantisation_ceiling(resolved.pix_fmt, resolved.range),
+        excluded_fraction=float(1.0 - interior.mean()),
     )
