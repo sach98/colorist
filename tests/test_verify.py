@@ -742,3 +742,160 @@ def test_a_genuine_grade_is_not_mistaken_for_an_identical_file(tmp_path: Path):
     report = json.loads((tmp_path / "report.json").read_text())
     assert report["clipping"]["available"] is True
     assert report["clipping"]["max_frame_delta"] > 1.0 / 255.0
+
+
+def _rewrite_mask_identity(original: Path, destination: Path, **changes: object) -> Path:
+    """Copy a frozen mask, changing named fields of its recorded identity.
+
+    The mask array is copied untouched, so the only difference is the provenance
+    record. That isolates what staging validates about provenance from what it
+    validates about pixels.
+    """
+    with np.load(original, allow_pickle=False) as archive:
+        mask = np.asarray(archive["mask"], dtype=bool)
+        identity = json.loads(str(archive["identity_json"].item()))
+    identity.update(changes)
+    with destination.open("wb") as handle:
+        np.savez_compressed(
+            handle,
+            mask=mask,
+            identity_json=np.asarray(json.dumps(identity, sort_keys=True)),
+        )
+    return destination
+
+
+def _frozen_with_swapped_neutral(
+    frozen: list[ShotMeasurement], replacement: Path
+) -> dict[int, object]:
+    """Supply shot 0's neutral mask from ``replacement``, leaving the rest alone."""
+    swapped: dict[int, object] = {
+        index: measurement for index, measurement in enumerate(frozen)
+    }
+    swapped[0] = {
+        "neutral": replacement,
+        "skin": frozen[0].skin.frozen_mask_path if frozen[0].skin else None,
+    }
+    return swapped
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_fragment"),
+    [
+        ("mask_type", "skin", "mask_type"),
+        ("mask_algorithm_version", "measurement-v1", "mask_algorithm_version"),
+        ("dimensions", {"width": 7, "height": 9}, "dimensions"),
+    ],
+)
+def test_staged_mask_whose_record_contradicts_the_request_is_refused(
+    tmp_path: Path, field: str, value: object, expected_fragment: str
+) -> None:
+    """A frozen mask must not be staged when its own record disagrees with the ask.
+
+    Staging previously required only that an ``identity_json`` member EXIST. It
+    never parsed it, so a mask recorded as belonging to other frames, another
+    mask type, other dimensions, or a superseded algorithm was accepted and then
+    re-saved under a freshly derived identity that asserted it belonged here.
+    """
+    source, delivery, cuts, frozen = _clean_delivery(tmp_path)
+    tampered = _rewrite_mask_identity(
+        frozen[0].neutral.frozen_mask_path,
+        tmp_path / f"tampered-{field}.neutral.mask.npz",
+        **{field: value},
+    )
+
+    result = verify_delivery(
+        delivery,
+        H264_PROFILE,
+        load_gates(GATES),
+        _frozen_with_swapped_neutral(frozen, tampered),
+        cuts,
+        source_reference=source,
+        source_params=P709_FULL,
+    )
+
+    assert result.state == "ERROR"
+    assert expected_fragment in (result.error or "")
+
+
+def test_staged_mask_from_unrelated_media_is_refused_when_a_source_is_supplied(
+    tmp_path: Path,
+) -> None:
+    """With a source reference in hand, a mask frozen on other media is refusable.
+
+    This is the case a same-sized mask from unrelated footage would otherwise
+    slip through: every structural field can be made to agree while the mask was
+    measured on a completely different file.
+    """
+    source, delivery, cuts, frozen = _clean_delivery(tmp_path)
+    tampered = _rewrite_mask_identity(
+        frozen[0].neutral.frozen_mask_path,
+        tmp_path / "unrelated.neutral.mask.npz",
+        source_digest="sha256:" + "0" * 64,
+    )
+
+    result = verify_delivery(
+        delivery,
+        H264_PROFILE,
+        load_gates(GATES),
+        _frozen_with_swapped_neutral(frozen, tampered),
+        cuts,
+        source_reference=source,
+        source_params=P709_FULL,
+    )
+
+    assert result.state == "ERROR"
+    assert "source_digest" in (result.error or "")
+
+
+def test_staged_mask_with_an_unparseable_record_is_refused(tmp_path: Path) -> None:
+    source, delivery, cuts, frozen = _clean_delivery(tmp_path)
+    destination = tmp_path / "corrupt.neutral.mask.npz"
+    with np.load(frozen[0].neutral.frozen_mask_path, allow_pickle=False) as archive:
+        mask = np.asarray(archive["mask"], dtype=bool)
+    with destination.open("wb") as handle:
+        np.savez_compressed(
+            handle, mask=mask, identity_json=np.asarray("{not json")
+        )
+
+    result = verify_delivery(
+        delivery,
+        H264_PROFILE,
+        load_gates(GATES),
+        _frozen_with_swapped_neutral(frozen, destination),
+        cuts,
+        source_reference=source,
+        source_params=P709_FULL,
+    )
+
+    assert result.state == "ERROR"
+    assert "identity" in (result.error or "")
+
+
+def test_staged_mask_frozen_for_other_frames_is_still_accepted(tmp_path: Path) -> None:
+    """Freezing an ROI means deriving it once and applying it to other frames.
+
+    The recorded ``frames`` field says which frames the region was derived from,
+    not which frames it may be applied to, and the qc workflow relies on that:
+    it derives a mask on the sampled positions and stages it over the shot. An
+    equality check on this field was written during the staging-provenance fix
+    and removed again when it refused the tool's own primary workflow. This test
+    pins the behaviour so the check is not reintroduced.
+    """
+    source, delivery, cuts, frozen = _clean_delivery(tmp_path)
+    restamped = _rewrite_mask_identity(
+        frozen[0].neutral.frozen_mask_path,
+        tmp_path / "other-frames.neutral.mask.npz",
+        frames=[901, 902, 903],
+    )
+
+    result = verify_delivery(
+        delivery,
+        H264_PROFILE,
+        load_gates(GATES),
+        _frozen_with_swapped_neutral(frozen, restamped),
+        cuts,
+        source_reference=source,
+        source_params=P709_FULL,
+    )
+
+    assert result.state != "ERROR"

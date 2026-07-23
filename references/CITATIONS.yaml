@@ -1,0 +1,562 @@
+# SPDX-License-Identifier: CC-BY-4.0
+#
+# The citation ledger.
+#
+# Every [S:], [M:], and [C:] evidence tag used anywhere in references/ must be
+# accounted for here, either as a verified `citations` entry or as a named entry
+# in `pending_backfill`. tests/test_citations.py enforces that, offline. The
+# online companion, tools/verify_citations.py, re-checks every DOI locator
+# against its registrar and is run by hand.
+#
+# WHY A LEDGER AND NOT A URL LIST
+#
+# The previous verification record for this project was a list of URLs and their
+# HTTP status codes. Auditing the v2 research sweep on 2026-07-23 showed that is
+# not sufficient. Of eighteen supplied DOIs, six were wrong, and five of those
+# six RESOLVED CLEANLY to a real record that was a different paper. Publisher DOI
+# suffixes are near-sequential, so a single corrupted digit lands on a neighbour
+# in the same journal. Concretely:
+#
+#   supplied 10.1002/col.5080200106 -> real, but Rich 1995 on observer metamerism,
+#            claimed to be Hung and Berns on constant hue loci, which is ...506
+#   supplied 10.1002/col.10049      -> real, but Barnard 2002 on a colour data set,
+#            claimed to be the CIEDE2000 development paper, which is col.1049
+#   supplied 10.1145/237170.237275  -> real, but Nishimura 1996 "VC-1",
+#            claimed to be Smith and Blinn "Blue screen matting", which is ...263
+#
+# A status-code check passes all three. Comparing the registrar's title against
+# the claimed title catches all three. That is the method this ledger records.
+#
+# VOCABULARY
+#
+# verification.method
+#   registrar_metadata  A DOI registrar (Crossref or DataCite) returned metadata
+#                       whose title matches the claimed title. Strongest automated
+#                       check available and the only one that catches near-miss DOIs.
+#   publisher_landing   The publisher's own identifier-encoded catalogue page
+#                       returned HTTP 200. Confirms the identifier exists in that
+#                       publisher's catalogue. Does NOT confirm document content.
+#   repository_anchor   The claim is pinned to numeric vectors stored in this
+#                       repository and re-checked by the test suite on every run.
+#   unverified          Not yet checked. Such entries belong in pending_backfill.
+#
+# verification.claim_depth
+#   identifier_only     We confirmed the document exists and is the one named. We
+#                       have NOT confirmed it states the specific claim made in the
+#                       reference text. Prose citing such an entry must not put
+#                       words in the document's mouth.
+#   content_checked     The relevant passage was read and the claim matches it.
+#
+# No entry in this file is content_checked yet. That is a deliberate, visible gap:
+# identifier verification was done first because it is the check that catches
+# fabrication, and content verification follows per claim as the reference prose
+# is written.
+
+schema: colorist/citations/v1
+
+# Tags that are the documentation of the tagging scheme itself, not citations.
+# The enforcing test ignores exactly these and nothing else.
+legend_tags:
+  - "S: ..."
+  - "S: standard"
+  - "M: ..."
+  - "M: manufacturer document, with anchors in tests/vectors/"
+  - "C: ..."
+  - "C: named craft source"
+
+citations:
+
+  # ---------------------------------------------------------------------------
+  # Perceptually uniform spaces and hue behaviour under chroma change.
+  # Located for v2 research topic C. None is cited in reference prose yet.
+  # ---------------------------------------------------------------------------
+
+  - id: ipt-ebner-fairchild-1998
+    kind: paper
+    title: "Development and Testing of a Color Space (IPT) with Improved Hue Uniformity"
+    author: "Ebner"
+    year: 1998
+    venue: "Color and Imaging Conference"
+    locator: {type: doi, value: "10.2352/cic.1998.6.1.art00003"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+
+  - id: jzazbz-safdar-2017
+    kind: paper
+    title: "Perceptually uniform color space for image signals including high dynamic range and wide gamut"
+    author: "Safdar"
+    year: 2017
+    venue: "Optics Express"
+    locator: {type: doi, value: "10.1364/oe.25.015131"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+
+  - id: cam16-li-2017
+    kind: paper
+    title: "Comprehensive color solutions: CAM16, CAT16, and CAM16-UCS"
+    author: "Li"
+    year: 2017
+    venue: "Color Research & Application"
+    locator: {type: doi, value: "10.1002/col.22131"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+
+  - id: cam02ucs-luo-2006
+    kind: paper
+    title: "Uniform colour spaces based on CIECAM02 colour appearance model"
+    author: "Luo"
+    year: 2006
+    venue: "Color Research & Application"
+    locator: {type: doi, value: "10.1002/col.20227"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+
+  - id: hue-linearity-zhao-2020
+    kind: paper
+    title: "Hue linearity of color spaces for wide color gamut and high dynamic range media"
+    author: "Zhao"
+    year: 2020
+    venue: "Journal of the Optical Society of America A"
+    locator: {type: doi, value: "10.1364/JOSAA.386515"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+
+  - id: constant-hue-wang-2022
+    kind: paper
+    title: "Constant hue loci in different color spaces for stimuli in Rec. 2020 color gamut and HDR conditions"
+    author: "Wang"
+    year: 2022
+    venue: "Optics Express"
+    locator: {type: doi, value: "10.1364/oe.475433"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+
+  - id: constant-hue-hung-berns-1995
+    kind: paper
+    title: "Determination of constant Hue Loci for a CRT gamut and their predictions using color appearance spaces"
+    author: "Hung"
+    year: 1995
+    venue: "Color Research & Application"
+    locator: {type: doi, value: "10.1002/col.5080200506"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+
+  - id: unified-space-lissner-urban-2012
+    kind: paper
+    title: "Toward a Unified Color Space for Perception-Based Image Processing"
+    author: "Lissner"
+    year: 2012
+    venue: "IEEE Transactions on Image Processing"
+    locator: {type: doi, value: "10.1109/TIP.2011.2163522"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+
+  # ---------------------------------------------------------------------------
+  # Colour difference.
+  # ---------------------------------------------------------------------------
+
+  - id: ciede2000-luo-2001
+    kind: paper
+    title: "The development of the CIE 2000 colour-difference formula: CIEDE2000"
+    author: "Luo"
+    year: 2001
+    venue: "Color Research & Application"
+    locator: {type: doi, value: "10.1002/col.1049"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+
+  # ---------------------------------------------------------------------------
+  # Skin colour, memory colour, and preferred reproduction.
+  # Located for v2 research topic A, to ground the shipped skin targets in
+  # published work rather than in vectorscope folklore.
+  # ---------------------------------------------------------------------------
+
+  - id: memory-colors-bartleson-1960
+    kind: paper
+    title: "Memory Colors of Familiar Objects"
+    author: "Bartleson"
+    year: 1960
+    venue: "Journal of the Optical Society of America"
+    locator: {type: doi, value: "10.1364/josa.50.000073"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+
+  - id: preferred-skin-zeng-luo-2011
+    kind: paper
+    title: "Colour and tolerance of preferred skin colours on digital photographic images"
+    author: "Zeng"
+    year: 2011
+    venue: "Color Research & Application"
+    locator: {type: doi, value: "10.1002/col.20696"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+    note: >
+      Checked 2026-07-23. Unpaywall reports is_oa false, oa_status closed, so
+      there is no readable version. Its Crossref abstract does confirm the paper
+      contains what this project needs: "Variations and hue and chroma tolerances
+      of the observer skin colour preference are also analysed", and it works in
+      the CIELAB a*b* plane, not Oklab, so any tolerance taken from it would need
+      converting. The abstract is publisher metadata and is quotable; the
+      tolerance VALUES are not obtainable here.
+
+  - id: colour-memory-bodrogi-2001
+    kind: paper
+    title: "Colour memory for various sky, skin, and plant colours: Effect of the image context"
+    author: "Bodrogi"
+    year: 2001
+    venue: "Color Research & Application"
+    locator: {type: doi, value: "10.1002/col.1034"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+
+  - id: pmc-chart-luo-2024
+    kind: paper
+    title: "The new preferred memory color (PMC) chart"
+    author: "Luo"
+    year: 2024
+    venue: "Color Research & Application"
+    locator: {type: doi, value: "10.1002/col.22940"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+    note: >
+      colour-science 0.4.7 ships a 30-patch colourchecker named PMC whose four
+      skin patches are Caucasian, Oriental, South Asian, and African. Checked
+      2026-07-23: the package attributes that dataset to this exact DOI, in
+      colour/characterisation/datasets/colour_checkers/sds.py, which cites
+      "Luo, M. R. (2024). The new preferred memory color (PMC) chart. Color
+      Research & Application, col.22940. doi:10.1002/col.22940". That is the
+      package's attribution, which is checkable and is what this repository
+      relies on. It is NOT the paper itself confirming the spectra, so any claim
+      about what the chart's values mean still needs the paper read.
+
+      Checked 2026-07-23. Unpaywall reports is_oa true, oa_status hybrid, licence
+      cc-by, published version, at
+      https://onlinelibrary.wiley.com/doi/pdfdirect/10.1002/col.22940 . The
+      publisher returns HTTP 403 to automated requests, so it could NOT be read
+      here despite being open access. Its Crossref abstract states the chart
+      "comprises 30 colored patches, divided into three groups: preferred memory
+      colors, reference color-gamut colors, and a gray scale".
+
+      OPEN AND LOAD BEARING: whether the four skin patches sit in the preferred
+      memory colour group is currently inferred from the patch names and that
+      three-group structure, not read. references/color-theory/skin-targets-measured.md
+      builds a preferred-versus-accurate comparison on that inference and labels
+      it as unverified. Reading this paper would settle it.
+
+  - id: ita-chardon-1991
+    kind: paper
+    title: "Skin colour typology and suntanning pathways"
+    author: "Chardon"
+    year: 1991
+    venue: "International Journal of Cosmetic Science"
+    locator: {type: doi, value: "10.1111/j.1467-2494.1991.tb00561.x"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+    note: >
+      Commonly cited as the origin of the Individual Typology Angle. The formula
+      itself is NOT yet verified against the paper text and must not be quoted
+      from this entry alone.
+
+  - id: ethnic-skin-xiao-2016
+    kind: paper
+    title: "Characterising the variations in ethnic skin colours: a new calibrated data base for human skin"
+    author: "Xiao"
+    year: 2016
+    venue: "Skin Research and Technology"
+    locator: {type: doi, value: "10.1111/srt.12295"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+
+  - id: issa-lu-2025
+    kind: dataset
+    title: "The International Skin Spectra Archive (ISSA): a multicultural human skin phenotype and colour spectra collection"
+    author: "Lu"
+    year: 2025
+    venue: "figshare"
+    locator: {type: doi, value: "10.6084/m9.figshare.28228571"}
+    verification: {method: registrar_metadata, registrar: DataCite, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+    note: >
+      Licence and record counts are NOT yet verified. Verify both before using
+      any of its spectra in this repository.
+
+  # ---------------------------------------------------------------------------
+  # Keying, matte extraction, and edge-aware refinement.
+  # Located for v2 research topic B, for the spatial secondaries work.
+  # ---------------------------------------------------------------------------
+
+  - id: blue-screen-matting-smith-blinn-1996
+    kind: paper
+    title: "Blue screen matting"
+    author: "Smith"
+    year: 1996
+    venue: "Proceedings of the 23rd annual conference on Computer graphics and interactive techniques"
+    locator: {type: doi, value: "10.1145/237170.237263"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+
+  - id: guided-filter-he-2013
+    kind: paper
+    title: "Guided Image Filtering"
+    author: "He"
+    year: 2013
+    venue: "IEEE Transactions on Pattern Analysis and Machine Intelligence"
+    locator: {type: doi, value: "10.1109/TPAMI.2012.213"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+
+  - id: bilateral-tomasi-manduchi-1998
+    kind: paper
+    title: "Bilateral filtering for gray and color images"
+    author: "Tomasi"
+    year: 1998
+    venue: "Sixth International Conference on Computer Vision"
+    locator: {type: doi, value: "10.1109/ICCV.1998.710815"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+
+  - id: domain-transform-gastal-oliveira-2011
+    kind: paper
+    title: "Domain transform for edge-aware image and video processing"
+    author: "Gastal"
+    year: 2011
+    venue: "ACM SIGGRAPH 2011 papers"
+    locator: {type: doi, value: "10.1145/1964921.1964964"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+
+  - id: video-matting-lin-2022
+    kind: paper
+    title: "Robust High-Resolution Video Matting with Temporal Guidance"
+    author: "Lin"
+    year: 2022
+    venue: "2022 IEEE/CVF Winter Conference on Applications of Computer Vision (WACV)"
+    locator: {type: doi, value: "10.1109/wacv51458.2022.00319"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+
+  # ---------------------------------------------------------------------------
+  # Full-reference image quality, as prior art for the evaluation harness metric.
+  # ---------------------------------------------------------------------------
+
+  - id: fsim-zhang-2011
+    kind: paper
+    title: "FSIM: A Feature Similarity Index for Image Quality Assessment"
+    author: "Zhang"
+    year: 2011
+    venue: "IEEE Transactions on Image Processing"
+    locator: {type: doi, value: "10.1109/TIP.2011.2109730"}
+    verification: {method: registrar_metadata, registrar: Crossref, checked: "2026-07-23", claim_depth: identifier_only}
+    tags: []
+
+  # ---------------------------------------------------------------------------
+  # Standards already cited in v1 reference prose. Verified at the publisher's
+  # identifier-encoded catalogue page, which confirms the identifier exists but
+  # not the document's content. The existing "identifier-cited" wording in the
+  # reference prose already says exactly that, so the tags and this method agree.
+  # ---------------------------------------------------------------------------
+
+  - id: itu-bt709
+    kind: standard
+    title: "Recommendation ITU-R BT.709"
+    locator: {type: url, value: "https://www.itu.int/rec/R-REC-BT.709/en"}
+    verification: {method: publisher_landing, http_status: 200, checked: "2026-07-23", claim_depth: identifier_only}
+    tags:
+      - "S: ITU-R BT.709-6, identifier-cited"
+      - "S: Recommendation ITU-R BT.709-6, identifier-cited"
+
+  - id: itu-bt1886
+    kind: standard
+    title: "Recommendation ITU-R BT.1886"
+    locator: {type: url, value: "https://www.itu.int/rec/R-REC-BT.1886/en"}
+    verification: {method: publisher_landing, http_status: 200, checked: "2026-07-23", claim_depth: identifier_only}
+    tags:
+      - "S: ITU-R BT.1886, identifier-cited"
+
+  - id: itu-bt2020
+    kind: standard
+    title: "Recommendation ITU-R BT.2020"
+    locator: {type: url, value: "https://www.itu.int/rec/R-REC-BT.2020/en"}
+    verification: {method: publisher_landing, http_status: 200, checked: "2026-07-23", claim_depth: identifier_only}
+    tags:
+      - "S: Recommendation ITU-R BT.2020, identifier-cited"
+
+  - id: itu-bt2035
+    kind: standard
+    title: "Recommendation ITU-R BT.2035"
+    locator: {type: url, value: "https://www.itu.int/rec/R-REC-BT.2035/en"}
+    verification: {method: publisher_landing, http_status: 200, checked: "2026-07-23", claim_depth: identifier_only}
+    tags:
+      - "S: ITU-R BT.2035, identifier-cited"
+
+  - id: itu-bt2390
+    kind: standard
+    title: "Report ITU-R BT.2390"
+    locator: {type: url, value: "https://www.itu.int/pub/R-REP-BT.2390"}
+    verification: {method: publisher_landing, http_status: 200, checked: "2026-07-23", claim_depth: identifier_only}
+    tags:
+      - "S: Report ITU-R BT.2390, identifier-cited"
+
+  - id: cie-15
+    kind: standard
+    title: "CIE 15, Colorimetry"
+    locator: {type: url, value: "https://cie.co.at/publications/colorimetry-4th-edition"}
+    verification: {method: publisher_landing, http_status: 200, checked: "2026-07-23", claim_depth: identifier_only}
+    tags:
+      - "S: CIE 15:2018, Colorimetry"
+    note: >
+      The reference prose cites the 2018 edition. The CIE catalogue currently
+      lists a 4th edition; the 3rd edition page also resolves. Which edition the
+      cited claim came from is NOT established and needs a content check.
+
+  - id: cie-160
+    kind: standard
+    title: "CIE 160:2004, A Review of Chromatic Adaptation Transforms"
+    locator: {type: url, value: "https://cie.co.at/publications/review-chromatic-adaptation-transforms"}
+    verification: {method: publisher_landing, http_status: 200, checked: "2026-07-23", claim_depth: identifier_only}
+    tags:
+      - "S: CIE 160:2004, A Review of Chromatic Adaptation Transforms, identifier-cited"
+
+  - id: iec-61966-2-1
+    kind: standard
+    title: "IEC 61966-2-1, sRGB"
+    locator: {type: url, value: "https://webstore.iec.ch/publication/6169"}
+    verification: {method: publisher_landing, http_status: 200, checked: "2026-07-23", claim_depth: identifier_only}
+    tags:
+      - "S: IEC 61966-2-1"
+
+  - id: iso-cie-11664-6
+    kind: standard
+    title: "ISO/CIE 11664-6, Colorimetry Part 6: CIEDE2000 Colour-difference formula"
+    locator: {type: url, value: "https://www.iso.org/standard/74164.html"}
+    verification: {method: publisher_landing, http_status: 200, checked: "2026-07-23", claim_depth: identifier_only}
+    tags:
+      - "S: ISO/CIE 11664-6, Colorimetry -- Part 6: CIEDE2000 Colour-difference formula"
+
+  # ---------------------------------------------------------------------------
+  # Manufacturer documents. These are the strongest citations in the repository
+  # because the claim is not a sentence in a PDF, it is a table of numbers stored
+  # here and re-derived by tests/test_idt.py on every suite run.
+  # ---------------------------------------------------------------------------
+
+  - id: vendor-log-anchors
+    kind: manufacturer
+    title: "Camera log curve and gamut anchors, as stored test vectors"
+    locator: {type: repository, value: "tests/vectors/"}
+    verification:
+      method: repository_anchor
+      checked: "2026-07-23"
+      claim_depth: content_checked
+      detail: >
+        Five vector files with SPDX licence sidecars, consumed by tests/test_idt.py:
+        logc4_awg4.json, logc3ei800_awg3.json, slog3_sgamut3cine.json,
+        vlog_vgamut.json, clog3_cgamut.json. The numeric claims are re-checked by
+        the suite, so they cannot silently drift from what is cited.
+    tags:
+      - "M: ARRI LogC4 Logarithmic Color Space Specification, tests/vectors/logc4_awg4.json"
+      - "M: Sony S-Gamut3.Cine/S-Log3 Technical Summary, tests/vectors/slog3_sgamut3cine.json"
+      - "M: Sony, ARRI, Panasonic, and Canon documentation anchors, tests/vectors/*.json"
+      - "M: vendor documentation anchors, tests/vectors/*.json"
+
+# -----------------------------------------------------------------------------
+# Tags in use that have NOT been verified yet. This list is the honest record of
+# the gap. It may only shrink. tests/test_citations.py permits a tag to appear
+# here instead of in `citations`, and fails on any tag that appears in neither,
+# so a new unverified citation cannot enter the repository unnoticed.
+# -----------------------------------------------------------------------------
+
+pending_backfill:
+
+  - tag: "S: SMPTE RP 431-2, identifier-cited"
+    reason: >
+      The SMPTE catalogue is served through IEEE Xplore, which answered the
+      identifier query with HTTP 202 rather than a document. 202 is not evidence
+      the identifier exists, so this is recorded as unverified rather than passed.
+
+  - tag: "S: SMPTE ST 2080-3:2017, identifier-cited"
+    reason: >
+      Same as SMPTE RP 431-2. IEEE Xplore returned HTTP 202, which is not
+      verification.
+
+  - tag: 'C: Adobe, "Cube LUT Specification 1.0"'
+    reason: >
+      The original Adobe URL is dead. A Wayback Machine capture from 2022-02-15
+      returns HTTP 200 and is the likely durable locator, but its content has not
+      been confirmed to be the specification this repository implements.
+
+  - tag: 'C: American Society of Cinematographers, "ASC CDL" documentation'
+    reason: "No durable locator found yet. The theasc.com path guessed for it returned HTTP 404."
+
+  - tag: 'C: Dante Pascarella, "5 Color Grading Secrets That Make Pro Filmmakers Stand Out"'
+    reason: >
+      Craft video source. A transcript is archived at
+      docs/ai/research-archive/pascarella-five-secrets-transcript.txt but the
+      video identifier has not been recorded or re-checked.
+
+  - tag: 'C: Darren Mostyn, "How I Grade this Ad" masterclass'
+    reason: >
+      Craft video source. A transcript is archived at
+      docs/ai/research-archive/mostyn-grade-workflow-transcript.txt but the video
+      identifier has not been recorded or re-checked.
+
+  - tag: 'C: Dehancer, "Film Documentation: Halation"'
+    reason: "No durable locator found yet. The dehancer.com path guessed for it returned HTTP 404."
+
+  - tag: 'C: Filmmakers Academy, "Cinematography Lighting Ratios"'
+    reason: "No durable locator recorded."
+
+  - tag: 'C: Flashpoint Lighting, "Color Temperature in Lighting"'
+    reason: "No durable locator recorded."
+
+  - tag: 'C: Frame.io, "For Colorists: Review and Reference"'
+    reason: "No durable locator found yet. The blog.frame.io path guessed for it returned HTTP 404."
+
+  - tag: 'C: Kodak, "VISION Color Print Film 2383 / 3383 Technical Data"'
+    reason: "No durable locator found yet. The kodak.com path guessed for it returned HTTP 404."
+
+  - tag: 'C: StudioBinder, "Lighting 101: Motivated Lighting"'
+    reason: "No durable locator recorded."
+
+# -----------------------------------------------------------------------------
+# Locators that were supplied during research and REJECTED. Kept so the same
+# wrong locator is not re-adopted later, and as the evidence behind the note at
+# the top of this file about why status codes are not verification.
+# -----------------------------------------------------------------------------
+
+rejected:
+
+  - supplied: "10.1002/col.5080200106"
+    claimed_as: "Hung and Berns 1995, constant hue loci"
+    actually: "Rich 1995, Effects of observer metamerism in the determination of human color-matching functions"
+    correct_locator: "10.1002/col.5080200506"
+    checked: "2026-07-23"
+
+  - supplied: "10.1002/col.10049"
+    claimed_as: "the CIEDE2000 formula development paper"
+    actually: "Barnard 2002, A data set for color research"
+    correct_locator: "10.1002/col.1049"
+    checked: "2026-07-23"
+
+  - supplied: "10.1145/237170.237275"
+    claimed_as: "Smith and Blinn 1996, Blue screen matting"
+    actually: "Nishimura 1996, VC-1, in the same SIGGRAPH proceedings"
+    correct_locator: "10.1145/237170.237263"
+    checked: "2026-07-23"
+
+  - supplied: "10.1364/JOSAA.23.002077"
+    claimed_as: "ellipsoidal selection regions in perceptually uniform colour spaces"
+    actually: "Huertas 2006, Performance of a color-difference formula based on OSA-UCS space"
+    correct_locator: "none; no replacement located for this claim"
+    checked: "2026-07-23"
+
+  - supplied: "10.1109/TPAMI.2022.3165384"
+    claimed_as: "Lin et al 2022, temporally stable video matting"
+    actually: "does not resolve at Crossref or DataCite"
+    correct_locator: "10.1109/wacv51458.2022.00319"
+    checked: "2026-07-23"
+
+  - supplied: "https://github.com/aces-aswf/aces"
+    claimed_as: "the ACES 2.0 output transform repository"
+    actually: "not checked yet; the organisation name looks wrong and no ACES locator has been verified"
+    correct_locator: "none yet"
+    checked: "2026-07-23"

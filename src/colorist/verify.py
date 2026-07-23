@@ -35,11 +35,13 @@ from colorist.gates import (
 from colorist.grade import DeliveryProfile, _load_delivery_profile
 from colorist.idt import camera_to_working
 from colorist.measure import (
+    MASK_ALGORITHM_VERSION,
     MaskStat,
     ShotMeasurement,
     _frozen_mask_path,
     _mask_cache_identity,
     _save_frozen_mask,
+    _source_digest,
     measure_shot,
     sample_positions,
 )
@@ -190,6 +192,7 @@ def verify_delivery(
             shot_frames,
             frozen_masks,
             stream,
+            None if source_reference is None else Path(source_reference),
         )
         measurement_report = [
             _measurement_report(index, frames, measurement, output_profile)
@@ -1068,9 +1071,15 @@ def _remeasure_frozen_rois(
     shot_frames: Sequence[Sequence[int]],
     frozen_masks: object,
     stream: Mapping[str, Any],
+    source_reference: Path | None = None,
 ) -> list[ShotMeasurement]:
     if _frozen_masks_absent(frozen_masks):
         return []
+    # Hashed once per run, not once per shot: every shot's masks must trace to
+    # the same authenticated source.
+    source_digest = (
+        _source_digest(source_reference) if source_reference is not None else None
+    )
     width, height = _stream_dimensions(stream)
     params = ConvertParams(
         range=profile.range,
@@ -1095,6 +1104,7 @@ def _remeasure_frozen_rois(
                 height,
                 params,
                 temp_dir,
+                source_digest,
             )
             measurements.append(
                 measure_shot(
@@ -1170,6 +1180,63 @@ def _mask_type(path: Path) -> str | None:
     raise ValueError(f"cannot infer frozen mask type from {path}")
 
 
+def _check_staged_identity(
+    recorded: np.ndarray,
+    source: Path,
+    name: str,
+    width: int,
+    height: int,
+    source_digest: str | None,
+) -> None:
+    """Refuse a frozen mask whose own provenance record contradicts the request.
+
+    Staging a mask asserts that it covers this geometry, for this ROI class, by
+    the current algorithm. The mask file records all of that. Until this check
+    existed, staging confirmed only that an ``identity_json`` member was PRESENT,
+    never that it agreed with anything, and then re-saved the array under a
+    freshly derived identity that asserted it belonged here. A same-sized mask
+    from unrelated media was accepted silently.
+
+    ``source_digest`` binds the mask to the authenticated pre-grade source and is
+    the only check here that proves provenance rather than consistency. It is
+    available only when the caller supplied a source reference, so when it is
+    ``None`` this function verifies correspondence, not origin, and the report
+    must not claim otherwise.
+
+    The recorded ``frames`` are deliberately NOT compared. Freezing an ROI means
+    deriving a region once and applying it to whatever frames are measured later,
+    so a mask legitimately carries the frames it was derived from rather than the
+    frames it is being applied to. Requiring equality here would forbid the
+    frozen-ROI workflow itself.
+    """
+    try:
+        identity = json.loads(str(recorded.item()))
+    except (ValueError, TypeError, json.JSONDecodeError) as error:
+        raise VerificationError(
+            f"frozen {name} mask identity is not readable: {source}"
+        ) from error
+    if not isinstance(identity, Mapping):
+        raise VerificationError(
+            f"frozen {name} mask identity is not a record: {source}"
+        )
+
+    expected: dict[str, object] = {
+        "mask_type": name,
+        "dimensions": {"width": width, "height": height},
+        "mask_algorithm_version": MASK_ALGORITHM_VERSION,
+    }
+    if source_digest is not None:
+        expected["source_digest"] = source_digest
+
+    for field, wanted in expected.items():
+        found = identity.get(field)
+        if found != wanted:
+            raise VerificationError(
+                f"frozen {name} mask {field} is {found!r}, expected {wanted!r}: "
+                f"{source}"
+            )
+
+
 def _stage_masks(
     alias: Path,
     frames: Sequence[int],
@@ -1178,6 +1245,7 @@ def _stage_masks(
     height: int,
     params: ConvertParams,
     artifact_dir: Path,
+    source_digest: str | None,
 ) -> None:
     base_identity = _mask_cache_identity(
         alias, list(frames), params, None, (height, width)
@@ -1211,10 +1279,14 @@ def _stage_masks(
                         f"frozen {name} mask cache record is incomplete: {source}"
                     )
                 mask = np.asarray(archive["mask"], dtype=bool)
+                recorded = archive["identity_json"]
             if mask.shape != (height, width):
                 raise VerificationError(
                     f"frozen {name} mask has shape {mask.shape}, expected {(height, width)}"
                 )
+            _check_staged_identity(
+                recorded, source, name, width, height, source_digest
+            )
             _save_frozen_mask(destination, mask, identity)
 
 

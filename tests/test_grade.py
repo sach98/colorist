@@ -229,3 +229,32 @@ def test_grade_file_refuses_variable_frame_rate_input(tmp_path: Path) -> None:
             delivery_profile=H264_PROFILE,
             workdir=tmp_path / "delivery",
         )
+
+
+def test_cfr_guard_tolerates_timebase_quantization(tmp_path: Path) -> None:
+    """Ordinary 24fps footage must not be mistaken for variable frame rate.
+
+    Presentation stamps are integer ticks and 24 is not exactly representable,
+    so a genuinely constant 24fps stream reports intervals that alternate
+    between 0.041666 and 0.041667. That 1 microsecond step is 2.4e-5 relative,
+    and the original rel_tol of 1e-6 was 24 times tighter, so it refused a real
+    121 frame 24fps H.264 file outright (observed 2026-07-23).
+    """
+    from colorist.grade import _require_cfr
+
+    pts = [0.0]
+    for index in range(120):
+        pts.append(round(pts[-1] + (0.041666 if index % 3 else 0.041667), 6))
+    _require_cfr(pts)
+
+
+def test_cfr_guard_still_refuses_genuine_variable_rate() -> None:
+    """The loosened tolerance must not let real VFR through.
+
+    The project's own VFR fixture spans a 7x range between its shortest and
+    longest interval, which is nowhere near timebase noise.
+    """
+    from colorist.grade import VariableFrameRateError, _require_cfr
+
+    with pytest.raises(VariableFrameRateError):
+        _require_cfr([0.0, 0.04, 0.16, 0.36, 0.64])

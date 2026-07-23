@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 import math
+import statistics
 import os
 from pathlib import Path
 import subprocess
@@ -303,8 +304,23 @@ def _require_cfr(pts: list[float]) -> None:
     intervals = [right - left for left, right in zip(pts, pts[1:])]
     if any(interval <= 0.0 for interval in intervals):
         raise VariableFrameRateError("v1 grade requires monotonically increasing CFR PTS")
-    first = intervals[0]
-    if not all(math.isclose(interval, first, rel_tol=1e-6, abs_tol=1e-9) for interval in intervals[1:]):
+    # Compare against the MEDIAN, not intervals[0]: one odd first interval
+    # should not condemn the whole stream.
+    #
+    # The tolerance has to survive timebase quantization. Presentation stamps are
+    # integer ticks, and a rate like 24 is not exactly representable, so a
+    # genuinely constant 24fps stream reports intervals that alternate between
+    # 0.041666 and 0.041667: a 1 microsecond step, 2.4e-5 relative. The former
+    # rel_tol of 1e-6 was 24 times tighter than that and refused ordinary CFR
+    # footage (observed 2026-07-23 on a 121 frame 24fps H.264 file). Genuine VFR
+    # is not a near miss: the project's own VFR fixture spans a 7x range between
+    # its shortest and longest interval, so 1e-3 separates the two cleanly while
+    # sitting 40 times above the quantization noise.
+    reference = statistics.median(intervals)
+    if not all(
+        math.isclose(interval, reference, rel_tol=1e-3, abs_tol=1e-9)
+        for interval in intervals
+    ):
         raise VariableFrameRateError("v1 grade requires CFR input; variable frame PTS refused")
 
 

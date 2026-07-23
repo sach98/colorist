@@ -50,4 +50,10 @@ colorist = ["presets/**/*.yaml"]
 testpaths = ["tests"]
 filterwarnings = [
     'ignore:.*"Matplotlib" related API features are not available.*',
+    # corpus._aligned deliberately resamples every spectrum onto the observer's
+    # shape before integrating, and colour-science warns on each such alignment.
+    # The warning describes an action this project takes on purpose and documents
+    # in corpus.py, so it is noise here. Scoped to the alignment message only, so
+    # any other ColourRuntimeWarning still surfaces.
+    'ignore:Aligning .* shape to .*:colour.utilities.verbose.ColourRuntimeWarning',
 ]
