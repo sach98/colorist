@@ -14,11 +14,14 @@ import pytest
 
 from colorist.corpus import ChartLayout, Scene, reference_roi, render
 from colorist.scorecard import (
+    EFFECT_SIZE_FLOOR_PER_STEP,
     MIN_CHROMA_FOR_HUE,
+    SATURATION_SEVERITY,
     SKIN_HUE_CENTRE_DEGREES,
     ScorecardError,
     Target,
     deviation_score,
+    expected_statistic,
     score_delivery,
     skin_hue_and_chroma,
 )
@@ -261,3 +264,82 @@ def test_the_active_aperture_changes_the_black_measurement() -> None:
 
     assert with_bars == pytest.approx(0.0, abs=1e-9)
     assert within == pytest.approx(_card().by_name("tonal_black").value, abs=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# Expected statistics and effect sizes, for validation properties 5 and 6.
+# ---------------------------------------------------------------------------
+
+
+def test_the_expected_chroma_and_hue_statistics_are_exact() -> None:
+    """Property 5: numeric agreement of the statistic, not merely ordering.
+
+    Both families are analytic because the injector's declared parameter IS the
+    effect. Verified against the harness's own measurement at every severity, not
+    only at the endpoints.
+    """
+    from colorist.corpus import inject
+
+    reference = _reference()
+    mask = reference_roi(reference, "skin")
+    base_hue, base_chroma = skin_hue_and_chroma(reference, mask)
+
+    for severity in (0.0, 0.25, 0.5, 0.75, 1.0):
+        _, chroma = skin_hue_and_chroma(inject(reference, "chroma", severity), mask)
+        assert chroma == pytest.approx(
+            expected_statistic("chroma", severity, base_chroma), rel=1e-6
+        )
+
+        hue, _ = skin_hue_and_chroma(inject(reference, "hue", severity), mask)
+        assert hue == pytest.approx(
+            expected_statistic("hue", severity, base_hue), abs=1e-6
+        )
+
+
+def test_tone_has_no_analytic_expectation_and_says_so() -> None:
+    """Refusing to predict is the honest answer for a content-dependent effect.
+
+    Tone's effect on black placement depends on where the content's blacks
+    already sit. On the corpus chart they sit at 24.3 IRE with no true black for
+    a lift to act on, so the statistic moves 2.87 percent at full severity. A
+    returned number would be fitted to this chart and wrong on other content.
+    """
+    assert expected_statistic("tone", 1.0, 24.3) is None
+
+
+def test_every_severity_step_clears_the_effect_size_floor() -> None:
+    """Property 6: a step nobody can resolve is a step the corpus cannot test."""
+    from colorist.corpus import inject
+
+    reference = _reference()
+    mask = reference_roi(reference, "skin")
+    base_hue, base_chroma = skin_hue_and_chroma(reference, mask)
+
+    chromas = [
+        skin_hue_and_chroma(inject(reference, "chroma", s), mask)[1]
+        for s in (0.0, 0.25, 0.5, 0.75, 1.0)
+    ]
+    hues = [
+        skin_hue_and_chroma(inject(reference, "hue", s), mask)[0]
+        for s in (0.0, 0.25, 0.5, 0.75, 1.0)
+    ]
+
+    for series, base in ((chromas, base_chroma), (hues, base_hue)):
+        steps = [abs(later - earlier) / base for earlier, later in zip(series, series[1:])]
+        assert min(steps) > EFFECT_SIZE_FLOOR_PER_STEP, steps
+
+
+def test_no_saturation_is_claimed_because_none_was_observed() -> None:
+    """Property 6 wants a documented saturation point. There is not one to document.
+
+    Every family is linear in severity across the whole 0 to 1 range, so the
+    constant is None rather than a number invented to fill the field.
+    """
+    assert SATURATION_SEVERITY is None
+
+
+def test_expected_statistic_refuses_unknown_families_and_severities() -> None:
+    with pytest.raises(ScorecardError, match="unknown defect family"):
+        expected_statistic("sharpness", 0.5, 1.0)
+    with pytest.raises(ScorecardError, match="severity"):
+        expected_statistic("hue", 2.0, 1.0)

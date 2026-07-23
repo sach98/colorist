@@ -451,3 +451,61 @@ def _assemble(results: tuple[DimensionResult, ...], declared: dict[str, Any]) ->
         )
     scores = [float(by_name[name].score) for name in wanted]
     return Scorecard(results, sum(scores) / len(scores), composite_name, tuple(wanted), None)
+
+
+# ---------------------------------------------------------------------------
+# Expected statistics and effect-size floors, for validation properties 5 and 6.
+#
+# Property 5 asks for numeric agreement of the STATISTIC at every severity, not
+# merely ordering of the score. Property 6 asks for a stated minimum effect size
+# per severity step, with a documented saturation point.
+#
+# WHICH PREDICTIONS ARE ANALYTIC AND WHICH ARE MEASURED
+#
+# Two of the three are exact and content-independent, because the injector's
+# declared parameter IS the effect:
+#
+#   chroma  the Oklab chroma scales by exactly the declared factor
+#   hue     the Oklab hue rotates by exactly the declared angle
+#
+# Verified on the first validation run: chroma at severity 1.0 read 0.02998
+# against a reference 0.05997, precisely the declared 0.5 scale, and hue rotated
+# exactly 12.000 degrees.
+#
+# Tone is NOT analytic and this module refuses to pretend otherwise. Its effect on
+# black placement depends on where the content's blacks already sit, and on the
+# corpus chart they sit at 24.3 IRE with no true black for a lift to act on, so
+# the statistic moves only 2.87 percent at full severity. A predicted value would
+# be a fitted number wearing a derivation. `expected_statistic` returns None for
+# it and the caller must measure.
+# ---------------------------------------------------------------------------
+
+#: Minimum fractional change in the primary statistic per 0.25 severity step,
+#: below which a step is not resolvable and property 6 fails. Measured on the
+#: reference chart: chroma 0.125 per step, hue 3 degrees on a 44.44 degree base
+#: which is 0.0675 per step. No saturation is observed anywhere in 0 to 1; every
+#: family is linear in severity across the whole range.
+EFFECT_SIZE_FLOOR_PER_STEP: Final[float] = 0.05
+SATURATION_SEVERITY: Final[float | None] = None
+
+
+def expected_statistic(family: str, severity: float, reference_value: float) -> float | None:
+    """The analytically expected statistic after a defect, or None if not analytic.
+
+    ``reference_value`` is the undamaged measurement of the same statistic, since
+    both analytic families are multiplicative or additive on it rather than
+    absolute.
+    """
+    from colorist.corpus import CHROMA_SCALE_AT_FULL, FAMILIES, HUE_ROTATION_AT_FULL
+
+    if family not in FAMILIES:
+        raise ScorecardError(f"unknown defect family {family!r}, expected one of {FAMILIES}")
+    if not 0.0 <= severity <= 1.0:
+        raise ScorecardError("severity must lie between 0 and 1 inclusive")
+
+    if family == "chroma":
+        return reference_value * (1.0 + severity * (CHROMA_SCALE_AT_FULL - 1.0))
+    if family == "hue":
+        return (reference_value + severity * HUE_ROTATION_AT_FULL) % 360.0
+    # Tone. Content dependent, so there is nothing honest to return.
+    return None
