@@ -1081,11 +1081,15 @@ def predicted_quantisation_ceiling(pix_fmt: str, video_range: str) -> float:
     as codec noise whichever profile is in use.
 
     One measured fact that surprised the design this replaced: the patch median
-    error is INDEPENDENT of how far patch edges are eroded, identical at margins
-    of 0, 1, 2, 4, 8 and 12 pixels, and identical on the IDR frame and a P frame.
-    It is a uniform per-patch bias, not a boundary artefact, so edge erosion is
-    the right way to avoid claiming a per-pixel expectation but is not what sets
-    this number.
+    error is barely affected by how far patch edges are eroded. On this machine
+    it does not move at all across margins of 0, 1, 2, 4, 8 and 12 pixels, and is
+    identical on the IDR frame and a P frame. On Linux runners, where x264 emits
+    a different bitstream, it varies by about thirty percent of itself over the
+    same margins. Either way it is not the order-of-magnitude change a
+    boundary-dominated quantity would show, so it is close to a uniform per-patch
+    bias rather than edge contamination. Erosion remains the right way to decline
+    a per-pixel expectation on a subsampled delivery, but it is not what sets this
+    number.
     """
     depth = _pix_fmt_bit_depth(pix_fmt)
     full = (1 << depth) - 1

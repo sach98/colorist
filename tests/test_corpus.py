@@ -1190,14 +1190,26 @@ def test_the_floor_is_measured_against_the_analytic_truth_not_against_a_file(
     assert shifted.patch_median_max > honest.patch_median_max + 3.0
 
 
-def test_the_delivery_floor_does_not_depend_on_edge_erosion(tmp_path) -> None:
-    """A finding, pinned: this error is a per-patch bias, not a boundary effect.
+def test_the_delivery_floor_is_not_dominated_by_boundary_contamination(tmp_path) -> None:
+    """Erosion barely moves this number, so it is not an edge effect.
 
     The design this replaced treated the patch median error as boundary
-    contamination to be eroded away, and swept the margin to find where it
-    plateaus. It does not plateau because it never varies: identical at margins
-    of 0, 1, 2, 4, 8 and 12. Erosion is still right for declining to offer a
-    per-pixel expectation, but it is not what sets this number.
+    contamination to be eroded away, and swept the margin looking for a plateau.
+    That is the wrong model: eroding two, four or eight pixels changes the answer
+    by a fraction of itself, not by the order of magnitude a boundary-dominated
+    quantity would.
+
+    PORTABILITY, corrected after CI. An earlier version of this test asserted the
+    stronger claim that the reading NEVER varies, which held exactly on this
+    machine, and it failed on every Linux runner: x264 emits a different
+    bitstream there and the readings ran 1.822, 1.822, 2.004, 2.363 across
+    margins of 0, 2, 4 and 8, a spread of 0.54. The independence was an artefact
+    of one encoder build.
+
+    So this asserts the behaviour, a bounded relative spread, rather than a
+    measured constant. That is the same lesson the repository already learned
+    once: an assertion on anything decoded from encoded media must pin the
+    behaviour, because every ffmpeg build rounds differently.
     """
     layout = _delivery_layout()
     reference = render(Scene(layout=layout))
@@ -1210,7 +1222,8 @@ def test_the_delivery_floor_does_not_depend_on_edge_erosion(tmp_path) -> None:
         ).patch_median_max
         for margin in (0, 2, 4, 8)
     }
-    assert max(readings.values()) - min(readings.values()) < 0.3, readings
+    spread = max(readings.values()) - min(readings.values())
+    assert spread / min(readings.values()) < 0.5, readings
 
 
 # ---------------------------------------------------------------------------
