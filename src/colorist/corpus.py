@@ -1004,3 +1004,107 @@ def masked_statistic(image: np.ndarray, mask: np.ndarray, statistic: str) -> flo
     if statistic == "luma_median":
         return float(np.median(sampled @ np.array([0.2126, 0.7152, 0.0722])))
     raise CorpusError(f"unknown statistic {statistic!r}")
+
+
+# ---------------------------------------------------------------------------
+# The delivery leg.
+#
+# A corpus item's carrier is lossless and is the reference. The DELIVERY is the
+# artefact a colourist would actually hand over, and it is what the harness
+# scores, so the corpus has to produce one and has to say what the codec cost.
+#
+# THE TRAP THIS CODE EXISTS TO AVOID
+#
+# The obvious design is to measure the delivery against the analytic truth, store
+# that residual, and hand it back as the tolerance a consumer should allow. That
+# is a circular oracle: the consumer then asserts residual <= residual and the
+# check cannot fail. Concretely, drop -color_range from the encode so a
+# full-range file is tagged limited, and every patch's measured error grows by
+# the 255/219 expansion, the stored allowance grows to match, and the corpus
+# certifies a delivery wrong by 6 percent of range.
+#
+# So the acceptance bound is NOT measured from the file. It is derived from the
+# delivery profile: bit depth, range, and the BT.709 matrix. Then a measurement
+# is being checked against something that was not measured from the artefact.
+# ---------------------------------------------------------------------------
+
+#: BT.709 YCbCr to RGB coefficients. The BLUE coefficient is the largest and is
+#: therefore what sets the worst-case bound. Using the red one, 1.5748, produces
+#: a ceiling that a real ProRes measurement exceeds, which is how a wrong model
+#: announces itself.
+BT709_CR_TO_R: Final[float] = 1.5748
+BT709_CB_TO_B: Final[float] = 1.8556
+BT709_CB_TO_G: Final[float] = 0.1873
+BT709_CR_TO_G: Final[float] = 0.4681
+
+
+def _pix_fmt_bit_depth(pix_fmt: str) -> int:
+    """Bit depth of an ffmpeg planar YUV pixel format name."""
+    for depth in (16, 14, 12, 10):
+        if f"p{depth}" in pix_fmt:
+            return depth
+    return 8
+
+
+def predicted_quantisation_ceiling(pix_fmt: str, video_range: str) -> float:
+    """Worst-case RGB error from YCbCr quantisation alone, in 8-bit code units.
+
+    Derived from the pixel format and the range, NOT measured from any file. That
+    independence is the entire point: it gives a bound that a measurement can be
+    checked against without checking a measurement against itself.
+
+    A half code step in Y and in chroma propagate into RGB through the BT.709
+    matrix, and blue is the worst channel because 1.8556 is the largest
+    coefficient. Measured against this bound on the reference scene:
+
+        h264-yt-sdr, 8 bit limited     ceiling 1.6384, observed 1.1539, ratio 0.70
+        prores-422hq, 10 bit limited   ceiling 0.4096, observed 0.4136, ratio 1.01
+
+    **The bound is quantisation only and ProRes exceeds it by one percent.** That
+    residual is chroma subsampling, which averages neighbouring samples and is
+    not in this model. So this is a scale check, not a hard bound, and a caller
+    should assert the observed floor is the right SIZE rather than strictly
+    under. That still catches the failure worth catching: a range mistake costs
+    the 255/219 expansion, roughly 16 code values, which is an order of magnitude
+    away and impossible to miss.
+    """
+    depth = _pix_fmt_bit_depth(pix_fmt)
+    full = (1 << depth) - 1
+    if video_range == "limited":
+        luma_span = (235 - 16) << (depth - 8)
+        chroma_span = (240 - 16) << (depth - 8)
+    elif video_range == "full":
+        luma_span = chroma_span = full
+    else:
+        raise CorpusError(f"unknown range {video_range!r}, expected limited or full")
+
+    luma_half = 0.5 / luma_span
+    chroma_half = 0.5 / chroma_span
+    worst = max(
+        luma_half + BT709_CR_TO_R * chroma_half,
+        luma_half + (BT709_CB_TO_G + BT709_CR_TO_G) * chroma_half,
+        luma_half + BT709_CB_TO_B * chroma_half,
+    )
+    return worst * 255.0
+
+
+def delivery_interior_mask(layout: ChartLayout, *, edge_margin: int = 2) -> np.ndarray:
+    """True where a delivery has a defensible per-patch expectation.
+
+    A subsampled delivery averages chroma across a patch boundary, so a pixel
+    beside an edge carries colour belonging partly to its neighbour and has no
+    expected value derivable from its own patch's reflectance. Comparing a
+    delivery to the analytic truth per pixel across the whole frame is therefore
+    a category error, not a strict measurement, and this mask is how the code
+    declines to make it.
+    """
+    if edge_margin < 0:
+        raise CorpusError("edge_margin must not be negative")
+    width, height = layout.resolution()
+    interior = np.zeros((height, width), dtype=bool)
+    for cell in range(layout.cells):
+        x0, y0, x1, y1 = layout.rect(cell)
+        if x1 - x0 <= 2 * edge_margin or y1 - y0 <= 2 * edge_margin:
+            continue
+        interior[y0 + edge_margin : y1 - edge_margin, x0 + edge_margin : x1 - edge_margin] = True
+    return interior

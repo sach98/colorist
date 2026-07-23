@@ -26,6 +26,7 @@ from colorist.corpus import (
     CorpusError,
     Scene,
     clipping_report,
+    delivery_interior_mask,
     expected_patches,
     inject,
     illuminant_map,
@@ -33,6 +34,7 @@ from colorist.corpus import (
     masked_statistic,
     patch_display_rgb,
     patch_map,
+    predicted_quantisation_ceiling,
     recoverable_patches,
     reference_roi,
     split_through_cell,
@@ -906,3 +908,94 @@ def test_unknown_roi_kinds_and_statistics_are_refused() -> None:
         reference_roi(image, "foliage")
     with pytest.raises(CorpusError, match="unknown statistic"):
         masked_statistic(image, reference_roi(image, "skin"), "vibes")
+
+
+# ---------------------------------------------------------------------------
+# The delivery leg's acceptance bound, derived rather than measured.
+# ---------------------------------------------------------------------------
+
+
+def test_the_quantisation_ceiling_comes_from_the_profile_not_from_a_file() -> None:
+    """A bound measured from the artefact cannot check the artefact.
+
+    An earlier proposal returned the analytic truth plus the MEASURED codec error
+    as the acceptance allowance, so a consumer asserts residual <= residual and
+    the check cannot fail. Drop -color_range from the encode, every measured
+    error grows by the 255/219 expansion, the allowance grows with it, and a
+    delivery wrong by 6 percent of range is certified.
+
+    This ceiling is derived from bit depth, range, and the BT.709 matrix. Nothing
+    about it can move when the file moves, which is the whole point.
+    """
+    eight_bit = predicted_quantisation_ceiling("yuv420p", "limited")
+    ten_bit = predicted_quantisation_ceiling("yuv422p10le", "limited")
+
+    assert eight_bit == pytest.approx(1.63839, abs=1e-4)
+    assert ten_bit == pytest.approx(0.40960, abs=1e-4)
+    # Four times the precision must buy roughly four times the accuracy.
+    assert eight_bit / ten_bit == pytest.approx(4.0, rel=0.01)
+    # Full range wastes no codes, so it must beat limited at the same depth.
+    assert predicted_quantisation_ceiling("yuv420p", "full") < eight_bit
+
+
+def test_the_ceiling_uses_the_blue_coefficient_because_it_is_the_largest() -> None:
+    """The specific error that made an earlier model contradict its own data.
+
+    Using the red coefficient 1.5748 rather than blue 1.8556 yields an 8-bit
+    limited ceiling of 1.4786 and a 10-bit one of 0.3696. The measured ProRes
+    patch median error is 0.4136, which EXCEEDS that, and a ceiling its own
+    observation exceeds is not a ceiling.
+    """
+    from colorist.corpus import BT709_CB_TO_B, BT709_CR_TO_R
+
+    observed_prores = 0.4136  # measured patch median error, 8-bit code units
+    ten_bit = predicted_quantisation_ceiling("yuv422p10le", "limited")
+    red_only = (0.5 / 876 + BT709_CR_TO_R * 0.5 / 896) * 255
+
+    assert BT709_CB_TO_B > BT709_CR_TO_R
+    assert ten_bit > red_only, "blue must set the bound"
+
+    # The blue model lands within one percent of the observation. The red model
+    # is eleven percent under it. Both are BELOW, because this ceiling covers
+    # quantisation only and 4:2:2 chroma subsampling adds a term it does not
+    # model, so this is a scale check and not a hard bound. Asserting the
+    # observation sits under it would be asserting something false.
+    assert observed_prores / ten_bit == pytest.approx(1.0, abs=0.02)
+    assert observed_prores / red_only > 1.10
+
+
+def test_a_range_mistake_is_an_order_of_magnitude_away_from_the_ceiling() -> None:
+    """The failure the ceiling exists to catch, sized.
+
+    Writing full-range codes into a file tagged limited expands every value by
+    255/219, about 16 code values at mid grey. Against an 8-bit ceiling of 1.64
+    that is ten times over, so it cannot be mistaken for codec noise however the
+    tolerance is phrased.
+    """
+    ceiling = predicted_quantisation_ceiling("yuv420p", "limited")
+    range_mistake = 0.5 * 255 * (255 / 219 - 1)
+    assert range_mistake / ceiling > 10
+
+
+def test_the_delivery_interior_mask_declines_to_expect_boundary_pixels() -> None:
+    """No per-pixel expectation is offered where subsampling mixes two patches."""
+    layout = _grid()
+    interior = delivery_interior_mask(layout, edge_margin=2)
+    width, height = layout.resolution()
+
+    assert interior.shape == (height, width)
+    for cell in range(layout.cells):
+        x0, y0, x1, y1 = layout.rect(cell)
+        assert not interior[y0, x0], "the patch corner must be excluded"
+        assert interior[(y0 + y1) // 2, (x0 + x1) // 2], "the patch centre must be kept"
+    # The surround has no defensible per-patch expectation at all.
+    assert not interior[0, 0]
+    # Eroding more keeps strictly less.
+    assert delivery_interior_mask(layout, edge_margin=4).sum() < interior.sum()
+
+
+def test_a_patch_too_small_to_erode_is_dropped_rather_than_measured_badly() -> None:
+    layout = _grid(patch_size=4)
+    assert delivery_interior_mask(layout, edge_margin=2).sum() == 0
+    with pytest.raises(CorpusError, match="must not be negative"):
+        delivery_interior_mask(layout, edge_margin=-1)
