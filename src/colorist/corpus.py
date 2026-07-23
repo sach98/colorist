@@ -1437,3 +1437,174 @@ def active_aperture(shape: tuple[int, int], bar_fraction: float = 0.12) -> np.nd
         aperture[:bar] = False
         aperture[-bar:] = False
     return aperture
+
+
+# ---------------------------------------------------------------------------
+# Non-chart content, for validation property 10.
+#
+# Every scene above is a grid of uniform rectangles. A metric can segment that by
+# finding flat blocks and label it by remembering coordinates, so it can score
+# well on the whole chart corpus while knowing nothing about skin or neutrals.
+# Varying the layout does not fix it: the geometry is still a grid of flats.
+#
+# A SoftScene has no rectangles, no uniform regions, and irregular outlines. The
+# map from position to meaning is gone and colour is the only thing left to use.
+#
+# WHAT IS AND IS NOT AMBIGUOUS
+#
+# The per-pixel COLOUR is never ambiguous. It is a convex mixture of published
+# reflectances under a stated illuminant, so it is a closed-form sum and the
+# ground truth is exact, just as for a chart.
+#
+# The per-pixel LABEL is ambiguous, in the transition band where no material
+# dominates. That is the point of soft boundaries and it must not be papered
+# over, so the truth carries a trimap: core, transition, outside. A region
+# statistic is defined over cores. Transition pixels are a don't-care band, which
+# is what validation property 9's precision and recall need in order to be
+# scored fairly.
+#
+# THE MIXTURE IS TAKEN IN LINEAR LIGHT, WHICH IS NOT OPTIONAL
+#
+# Spectral integration is linear in reflectance, so a coverage blend of two
+# materials is the blend of their linear RGB. bt1886_encode is a power law and a
+# power law does not commute with addition, so blending display code instead is
+# simply a different and wrong picture. Measured on this machine, a fifty-fifty
+# blend computed in display code rather than linear is wrong by 4.91 of an 8-bit
+# code value for light skin against neutral 5, and by 22.82 against black 2.
+# Clipping therefore happens once, after the sum.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Material:
+    """One published reflectance and the smooth field that places it.
+
+    The outline is polar, r(theta) = radius * (1 + sum of amplitude * cos(order *
+    theta + phase)). Low-order harmonics give a curved, irregular, non
+    axis-aligned shape, which is what defeats a fixed-rectangle region finder.
+
+    ``softness`` is the width in pixels over which coverage runs from zero to
+    one. It is the only knob trading edge-detector resistance against the size of
+    the ambiguous band.
+    """
+
+    patch: str
+    label: str
+    centre: tuple[float, float]
+    radius: float
+    harmonics: tuple[tuple[int, float, float], ...] = ()
+    softness: float = 3.0
+
+
+@dataclass(frozen=True)
+class SoftScene:
+    """Published reflectances with soft, irregular boundaries under one light.
+
+    NOT a photograph and NOT a renderer. No camera spectral sensitivity, no lens,
+    no noise, no specular lobe, no shadow, no interreflection, no occlusion.
+    Calling it a portrait would be a claim this module cannot support.
+    """
+
+    chart: str = "ISO 17321-1"
+    resolution: tuple[int, int] = (256, 160)
+    materials: tuple[Material, ...] = ()
+    backdrop: str = "neutral 5 (.70 D)"
+    illuminant: str = "D65"
+    balanced_for: str = ENCODE_WHITE
+    exposure: float = 1.0
+    #: Coverage at or above which a pixel is CORE. 1.0, not 0.98.
+    #:
+    #: A core pixel must BE the pure reflectance, not nearly it, or a region
+    #: statistic over cores is measuring a mixture and calling it a material.
+    #: Measured at a 0.98 threshold, core pixels deviated from the pure patch by
+    #: up to 1.12 of an 8-bit code value, because two percent of a neighbouring
+    #: material is easily a code value once the two differ in brightness.
+    #:
+    #: Fully covered interior pixels reach exactly 1.0, so this costs nothing but
+    #: a slightly smaller core, and it buys an exact claim.
+    core_threshold: float = 1.0
+    outside_threshold: float = 0.0
+
+
+def _coverage(scene: SoftScene, material: Material) -> np.ndarray:
+    width, height = scene.resolution
+    ys, xs = np.mgrid[0:height, 0:width]
+    dx = xs - material.centre[0]
+    dy = ys - material.centre[1]
+    distance = np.hypot(dx, dy)
+    theta = np.arctan2(dy, dx)
+
+    boundary = np.full_like(distance, material.radius)
+    for order, amplitude, phase in material.harmonics:
+        boundary = boundary * (1.0 + amplitude * np.cos(order * theta + phase))
+
+    # Smooth step across the boundary, softness pixels wide.
+    return np.clip(0.5 - (distance - boundary) / max(material.softness, 1e-9), 0.0, 1.0)
+
+
+def soft_coverage(scene: SoftScene) -> dict[str, np.ndarray]:
+    """Per-label coverage weights, summing to one at every pixel.
+
+    Materials are composited in order, each taking what it covers from what is
+    already there, and the backdrop keeps the remainder. That keeps the mixture
+    convex, which is what makes the per-pixel colour a defined quantity.
+    """
+    width, height = scene.resolution
+    remaining = np.ones((height, width), dtype=np.float64)
+    weights: dict[str, np.ndarray] = {}
+    for material in scene.materials:
+        if material.label in weights:
+            raise CorpusError(f"duplicate material label {material.label!r}")
+        taken = _coverage(scene, material) * remaining
+        weights[material.label] = taken
+        remaining = remaining - taken
+    weights["backdrop"] = remaining
+    return weights
+
+
+def soft_trimap(scene: SoftScene) -> dict[str, np.ndarray]:
+    """Per label: 2 where it is the core, 1 in transition, 0 outside.
+
+    A region statistic is defined over the core. The transition band is a
+    don't-care, because no single reflectance owns those pixels and pretending
+    one does is how a region metric gets scored against a fiction.
+    """
+    trimaps = {}
+    for label, weight in soft_coverage(scene).items():
+        band = np.zeros(weight.shape, dtype=np.int8)
+        # Strictly greater, so a threshold of zero means "any coverage at all"
+        # rather than "every pixel", which is what >= would give.
+        band[weight > scene.outside_threshold] = 1
+        band[weight >= scene.core_threshold] = 2
+        trimaps[label] = band
+    return trimaps
+
+
+def render_soft(scene: SoftScene) -> np.ndarray:
+    """Render a SoftScene to full-range Rec.709 display code."""
+    names = _patch_names(scene.chart)
+    for material in scene.materials:
+        if material.patch not in names:
+            raise CorpusError(
+                f"material patch {material.patch!r} is not in chart {scene.chart!r}"
+            )
+    if scene.backdrop not in names:
+        raise CorpusError(f"backdrop {scene.backdrop!r} is not in chart {scene.chart!r}")
+
+    weights = soft_coverage(scene)
+    linear_by_label = {
+        material.label: patch_linear_rgb(
+            scene.chart, material.patch, scene.illuminant, scene.balanced_for, scene.exposure
+        )
+        for material in scene.materials
+    }
+    linear_by_label["backdrop"] = patch_linear_rgb(
+        scene.chart, scene.backdrop, scene.illuminant, scene.balanced_for, scene.exposure
+    )
+
+    width, height = scene.resolution
+    accumulated = np.zeros((height, width, 3), dtype=np.float64)
+    for label, weight in weights.items():
+        accumulated += weight[..., None] * linear_by_label[label]
+    # Clip once, after the sum, because the sum is the physical quantity.
+    return bt1886_encode(np.clip(accumulated, 0.0, 1.0))

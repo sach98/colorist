@@ -27,7 +27,9 @@ from colorist.corpus import (
     GRAIN_AMPLITUDE_CODES,
     ChartLayout,
     CorpusError,
+    Material,
     Scene,
+    SoftScene,
     active_aperture,
     add_grain,
     add_letterbox,
@@ -46,8 +48,12 @@ from colorist.corpus import (
     patch_map,
     predicted_quantisation_ceiling,
     recoverable_patches,
+    patch_linear_rgb,
     reference_roi,
+    render_soft,
     severity_for_distance,
+    soft_coverage,
+    soft_trimap,
     split_through_cell,
     write_delivery,
     write_scene,
@@ -1303,3 +1309,134 @@ def test_grain_is_seeded_so_a_null_case_is_reproducible() -> None:
     assert not np.array_equal(add_grain(reference, 2.0, seed=3), add_grain(reference, 2.0, seed=4))
     with pytest.raises(CorpusError, match="must not be negative"):
         add_grain(reference, -1.0)
+
+
+# ---------------------------------------------------------------------------
+# Non-chart content, for validation property 10.
+# ---------------------------------------------------------------------------
+
+
+def _soft_scene() -> SoftScene:
+    return SoftScene(
+        materials=(
+            Material("light skin", "face", (96.0, 80.0), 34.0, ((3, 0.16, 0.4), (5, 0.07, 1.1))),
+            Material("white 9.5 (.05 D)", "shirt", (170.0, 120.0), 40.0, ((2, 0.22, 2.0),)),
+        )
+    )
+
+
+def test_soft_coverage_is_a_convex_mixture_everywhere() -> None:
+    """The per-pixel colour is only defined if the weights sum to one."""
+    weights = soft_coverage(_soft_scene())
+    total = sum(weights.values())
+    assert np.allclose(total, 1.0)
+    assert all((weight >= 0).all() for weight in weights.values())
+
+
+def test_a_core_pixel_is_exactly_the_pure_reflectance() -> None:
+    """Core must mean fully covered, not nearly covered.
+
+    At a 0.98 coverage threshold, core pixels deviated from the pure patch by up
+    to 1.12 of an 8-bit code value, because two percent of a neighbouring
+    material is easily a code value once the two differ in brightness. A region
+    statistic over such a core is measuring a mixture and calling it a material.
+    Fully covered interior pixels reach exactly 1.0, so requiring that costs a
+    slightly smaller core and buys an exact claim.
+    """
+    scene = _soft_scene()
+    image = render_soft(scene)
+    trimap = soft_trimap(scene)
+
+    for label, patch in (
+        ("face", "light skin"),
+        ("shirt", "white 9.5 (.05 D)"),
+        ("backdrop", "neutral 5 (.70 D)"),
+    ):
+        core = trimap[label] == 2
+        assert core.sum() > 1000, f"{label} core is too small to be useful"
+        pure = patch_display_rgb("ISO 17321-1", patch, "D65")
+        assert np.abs(image[core] - pure).max() == 0.0
+
+
+def test_the_transition_band_is_small_and_explicitly_dont_care() -> None:
+    """Soft boundaries make the LABEL ambiguous, never the colour.
+
+    Those pixels are a don't-care band for a region metric, which is what
+    validation property 9's precision and recall need in order to be scored
+    fairly. Measured: 3.1 percent of the frame.
+    """
+    scene = _soft_scene()
+    trimap = soft_trimap(scene)
+    ambiguous = np.zeros(scene.resolution[::-1], dtype=bool)
+    for band in trimap.values():
+        ambiguous |= band == 1
+    assert 0.005 < ambiguous.mean() < 0.10
+
+
+def test_the_mixture_is_taken_in_linear_light_not_in_display_code() -> None:
+    """The silent bug this avoids, sized.
+
+    Spectral integration is linear in reflectance, so a coverage blend is the
+    blend of linear RGB. bt1886_encode is a power law and does not commute with
+    addition, so blending display code is a different and wrong picture. Measured
+    for a fifty-fifty blend of light skin against black 2: 22.82 of an 8-bit code
+    value. This test would pass by coincidence if the two agreed, so it asserts
+    both that the render matches the linear blend AND that the two formulas
+    genuinely differ.
+    """
+    from colorist.corrections import bt1886_encode
+
+    first = patch_linear_rgb("ISO 17321-1", "light skin", "D65")
+    second = patch_linear_rgb("ISO 17321-1", "black 2 (1.5 D)", "D65")
+    linear_blend = bt1886_encode(np.clip(0.5 * first + 0.5 * second, 0.0, 1.0))
+    display_blend = 0.5 * bt1886_encode(np.clip(first, 0.0, 1.0)) + 0.5 * bt1886_encode(
+        np.clip(second, 0.0, 1.0)
+    )
+    assert np.abs(linear_blend - display_blend).max() * 255 > 20
+
+    # And the renderer takes the linear one. Compared against the blend implied
+    # by each pixel's OWN coverage, which is the actual claim, it is exact.
+    # Comparing against an idealised fifty-fifty blend instead would be testing
+    # how tight a coverage window was chosen: a plus or minus 0.01 window admits
+    # a 1.6 percent coverage spread and so 1.07 code values of legitimate
+    # variation.
+    scene = SoftScene(
+        materials=(Material("light skin", "blob", (128.0, 80.0), 40.0, (), softness=12.0),),
+        backdrop="black 2 (1.5 D)",
+    )
+    weights = soft_coverage(scene)
+    image = render_soft(scene)
+    band = (weights["blob"] > 0.05) & (weights["blob"] < 0.95)
+    assert band.sum() > 100, "no transition band to check"
+
+    coverage = weights["blob"][band][:, None]
+    per_pixel = bt1886_encode(np.clip(coverage * first + (1 - coverage) * second, 0.0, 1.0))
+    assert np.abs(image[band] - per_pixel).max() == 0.0
+
+
+def test_a_soft_scene_has_no_rectangles_to_find() -> None:
+    """The property that makes this held-out CONTENT and not another chart."""
+    scene = _soft_scene()
+    trimap = soft_trimap(scene)
+    core = trimap["face"] == 2
+    rows = np.where(core.any(axis=1))[0]
+    # An irregular outline means the covered width varies row to row. A rectangle
+    # would give the same width on every row it occupies.
+    widths = {int(core[row].sum()) for row in rows}
+    assert len(widths) > 10, "the region looks suspiciously rectangular"
+
+
+def test_soft_scenes_refuse_unknown_patches() -> None:
+    with pytest.raises(CorpusError, match="is not in chart"):
+        render_soft(SoftScene(materials=(Material("unicorn", "x", (10.0, 10.0), 5.0),)))
+    with pytest.raises(CorpusError, match="backdrop"):
+        render_soft(SoftScene(backdrop="unicorn"))
+    with pytest.raises(CorpusError, match="duplicate material label"):
+        soft_coverage(
+            SoftScene(
+                materials=(
+                    Material("light skin", "same", (10.0, 10.0), 5.0),
+                    Material("orange", "same", (20.0, 20.0), 5.0),
+                )
+            )
+        )
