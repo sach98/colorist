@@ -81,6 +81,7 @@ property 7 needs.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -1108,3 +1109,114 @@ def delivery_interior_mask(layout: ChartLayout, *, edge_margin: int = 2) -> np.n
             continue
         interior[y0 + edge_margin : y1 - edge_margin, x0 + edge_margin : x1 - edge_margin] = True
     return interior
+
+
+# ---------------------------------------------------------------------------
+# Combined defects and equal-distance pairs.
+#
+# Validation property 10 needs randomised and COMBINED defects, because a metric
+# fitted to one family at a time can be defeated by two at once. Property 13
+# needs pairs of items equally far from the reference by a whole-image measure
+# but carrying DIFFERENT per-dimension defects, which is the test that kills a
+# metric recognising overall distance but not meaning.
+#
+# Both need a stated distance, or "equally far" is not a claim. The distance used
+# here is the root mean square difference in display code over the whole frame,
+# in 8-bit code units. It is deliberately the crudest reasonable choice: a metric
+# that can be fooled by it is fooled by the thing a naive observer would call
+# "how different do these look", which is exactly the null metric property 13 is
+# aimed at.
+# ---------------------------------------------------------------------------
+
+
+def frame_distance(a: np.ndarray, b: np.ndarray) -> float:
+    """Root mean square display-code difference, in 8-bit code units."""
+    left = np.clip(np.asarray(a, dtype=np.float64), 0.0, 1.0)
+    right = np.clip(np.asarray(b, dtype=np.float64), 0.0, 1.0)
+    if left.shape != right.shape:
+        raise CorpusError("frame_distance needs two images of the same shape")
+    return float(np.sqrt(np.mean((left - right) ** 2)) * 255.0)
+
+
+def inject_many(
+    image: np.ndarray, defects: Sequence[tuple[str, float, str]]
+) -> np.ndarray:
+    """Apply several defects in order, for the combined case property 10 wants.
+
+    Order matters and is not commutative: a chroma scale after a tone compression
+    is not the same image as the reverse, because the tone curve is non-linear.
+    The sequence is therefore part of the item's identity and is recorded rather
+    than sorted into some canonical order.
+    """
+    result = np.clip(np.asarray(image, dtype=np.float64), 0.0, 1.0)
+    for family, severity, injector in defects:
+        result = inject(result, family, severity, injector=injector)
+    return result
+
+
+def severity_for_distance(
+    image: np.ndarray,
+    family: str,
+    target: float,
+    *,
+    injector: str = "primary",
+    tolerance: float = 1e-3,
+    max_iterations: int = 60,
+) -> float:
+    """Find the severity whose defect sits ``target`` away from ``image``.
+
+    Bisection on severity. Distance is monotonic in severity for every family
+    here, which is asserted by the monotonicity tests, so bisection is sound.
+
+    Raises rather than clamping when the target is beyond what severity 1.0 can
+    reach. Returning the closest available severity would silently produce a pair
+    that is NOT equal distance, which is the one property the caller wanted.
+    """
+    reference = np.clip(np.asarray(image, dtype=np.float64), 0.0, 1.0)
+    reachable = frame_distance(reference, inject(reference, family, 1.0, injector=injector))
+    if target > reachable:
+        raise CorpusError(
+            f"{family!r} with the {injector!r} injector reaches only "
+            f"{reachable:.4f} code values at severity 1.0, short of {target:.4f}"
+        )
+
+    low, high = 0.0, 1.0
+    for _ in range(max_iterations):
+        middle = (low + high) / 2.0
+        distance = frame_distance(
+            reference, inject(reference, family, middle, injector=injector)
+        )
+        if abs(distance - target) <= tolerance:
+            return middle
+        if distance < target:
+            low = middle
+        else:
+            high = middle
+    return (low + high) / 2.0
+
+
+def equal_distance_pair(
+    image: np.ndarray,
+    first: str,
+    second: str,
+    target: float,
+    *,
+    injector: str = "primary",
+) -> tuple[np.ndarray, np.ndarray, tuple[float, float]]:
+    """Two images equally far from ``image`` but damaged in different dimensions.
+
+    Returns the pair and the severities that produced it. Property 13 asserts
+    that a metric scores these DIFFERENTLY per dimension despite their equal
+    whole-image distance, so a metric that only measures overall difference
+    fails.
+    """
+    reference = np.clip(np.asarray(image, dtype=np.float64), 0.0, 1.0)
+    severities = (
+        severity_for_distance(reference, first, target, injector=injector),
+        severity_for_distance(reference, second, target, injector=injector),
+    )
+    return (
+        inject(reference, first, severities[0], injector=injector),
+        inject(reference, second, severities[1], injector=injector),
+        severities,
+    )

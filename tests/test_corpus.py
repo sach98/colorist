@@ -27,8 +27,11 @@ from colorist.corpus import (
     Scene,
     clipping_report,
     delivery_interior_mask,
+    equal_distance_pair,
     expected_patches,
+    frame_distance,
     inject,
+    inject_many,
     illuminant_map,
     invert,
     masked_statistic,
@@ -37,6 +40,7 @@ from colorist.corpus import (
     predicted_quantisation_ceiling,
     recoverable_patches,
     reference_roi,
+    severity_for_distance,
     split_through_cell,
     write_scene,
     render,
@@ -999,3 +1003,71 @@ def test_a_patch_too_small_to_erode_is_dropped_rather_than_measured_badly() -> N
     assert delivery_interior_mask(layout, edge_margin=2).sum() == 0
     with pytest.raises(CorpusError, match="must not be negative"):
         delivery_interior_mask(layout, edge_margin=-1)
+
+
+# ---------------------------------------------------------------------------
+# Combined defects and equal-distance pairs, for properties 10 and 13.
+# ---------------------------------------------------------------------------
+
+
+def test_equal_distance_pairs_really_are_equal_distance() -> None:
+    """Property 13 needs the premise to hold before the test means anything."""
+    reference = _reference()
+    first, second, severities = equal_distance_pair(reference, "chroma", "hue", 3.0)
+
+    assert frame_distance(reference, first) == pytest.approx(3.0, abs=0.01)
+    assert frame_distance(reference, second) == pytest.approx(3.0, abs=0.01)
+    # Different families need different severities to reach the same distance,
+    # which is the whole reason the pair is interesting.
+    assert abs(severities[0] - severities[1]) > 0.1
+
+
+def test_an_equal_distance_pair_damages_different_dimensions() -> None:
+    """Equal overall distance, different per-dimension signature.
+
+    This is what kills a metric that measures how different two images are
+    without knowing what changed. The chroma member must move skin chroma and
+    leave hue alone; the hue member must do the reverse.
+    """
+    reference = _reference()
+    chroma_damaged, hue_damaged, _ = equal_distance_pair(reference, "chroma", "hue", 3.0)
+
+    base_hue, base_chroma = _oklab_hue_chroma(_skin_block(reference))
+    chroma_hue, chroma_chroma = _oklab_hue_chroma(_skin_block(chroma_damaged))
+    hue_hue, hue_chroma = _oklab_hue_chroma(_skin_block(hue_damaged))
+
+    # The chroma member moved chroma much more than hue, and vice versa.
+    assert abs(chroma_chroma - base_chroma) / base_chroma > 0.02
+    assert abs(chroma_hue - base_hue) < 1.0
+    assert abs(hue_hue - base_hue) > 2.0
+    assert abs(hue_chroma - base_chroma) / base_chroma < 0.02
+
+
+def test_an_unreachable_target_distance_is_refused_not_clamped() -> None:
+    """Silently returning the closest severity would break the pair's premise."""
+    reference = _reference()
+    with pytest.raises(CorpusError, match="reaches only"):
+        severity_for_distance(reference, "hue", 500.0)
+
+
+def test_combined_defects_do_not_commute_and_the_order_is_part_of_the_item() -> None:
+    """Property 10 wants combined defects, and combining is not associative here.
+
+    A chroma scale after a tone compression is not the same image as the reverse,
+    because the tone curve is non-linear. Measured 1.08 code values apart. So the
+    sequence is part of an item's identity and must be recorded rather than
+    normalised into some canonical order.
+    """
+    reference = _reference()
+    forward = inject_many(reference, [("tone", 0.5, "primary"), ("chroma", 0.5, "primary")])
+    backward = inject_many(reference, [("chroma", 0.5, "primary"), ("tone", 0.5, "primary")])
+
+    assert frame_distance(forward, backward) > 0.5
+    # And a combination is further from the reference than either part alone.
+    single = inject(reference, "chroma", 0.5, injector="primary")
+    assert frame_distance(reference, forward) > frame_distance(reference, single)
+
+
+def test_frame_distance_refuses_mismatched_shapes() -> None:
+    with pytest.raises(CorpusError, match="same shape"):
+        frame_distance(np.zeros((4, 4, 3)), np.zeros((5, 4, 3)))
