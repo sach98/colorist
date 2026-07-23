@@ -807,6 +807,43 @@ the report says which.
 own validation has validated nothing. Where a property fails, the failure is
 recorded here and in the report.
 
+## 9a. What the first validation run actually found
+
+Run and recorded at `docs/research/measurements/2026-07-23-first-validation-run.md`,
+reproducible with `.venv/bin/python tools/run_validation.py`.
+
+**Properties 1 and 5 hold, and property 5 holds exactly.** Chroma at severity 1.0
+measures 0.02998 against a reference 0.05997, precisely the 0.5 scale the
+injector declares. Hue rotates exactly 12.000 degrees, precisely the declared
+rotation. That is numeric agreement of the statistic, not merely ordering.
+
+**Property 8 as first written was wrong, and the run said so.** It read "a family
+must move its own dimension more than any other". Tone compression moved skin
+chroma by 45.98 percent while moving black placement by 2.87 percent, so it
+failed. Both movements are real:
+
+- Compressing the tonal range to 65 percent of its span pulls every colour toward
+  mid grey, reducing colourfulness monotonically at 13.04, 24.98, 35.94 and
+  45.98 percent across the sweep.
+- The tone injector is a PER-CHANNEL curve, and per-channel curves do not
+  preserve hue. Skin hue moves 0.477, 0.961, 1.452 and 1.948 degrees across the
+  same sweep. A luminance-preserving curve would not do this, and the
+  per-channel curves real grading software offers do, so a tonal defect on real
+  footage arrives with a hue shift attached.
+
+So each family now declares an expected SIGNATURE, a set of dimensions it should
+move, and the property asserts that everything in the set moves and nothing
+outside it does. The naive form was also comparing percentages across
+incommensurable quantities, an angle against a ratio against an IRE value, which
+is the same category error this document already made once over skin hue and
+chroma.
+
+**A limitation of the corpus surfaced too.** The chart's darkest patch sits at
+24.3 IRE, so there is no true black for a lift to act on and black placement is a
+weak detector on this content, moving only 2.87 percent where p99 falls from
+95.14 to 59.27 IRE. The strong statistic for a tonal defect is the one that
+currently reports `EVIDENCE_ABSENT` for want of an authenticated source.
+
 ## 10. What the harness produces
 
 A JSON report and a human-readable summary containing, per item:
