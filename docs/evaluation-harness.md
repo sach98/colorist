@@ -687,6 +687,42 @@ claimed to be sufficient.
    which no region crosses a threshold, and that range computed and refused
    against rather than assumed.
 
+   **The declared laws, measured.** Each null case has one per statistic, and
+   they are not all "invariant":
+
+   | Null case | Statistic | Law |
+   |---|---|---|
+   | exposure gain k | skin HSV saturation median | invariant, exact |
+   | exposure gain k | neutral median R minus B | scales by k^(1/2.4), to 1e-16 |
+   | letterbox matte | any luma percentile | invariant **within the declared aperture**, exact |
+   | grain, amplitude a | skin HSV saturation median | within 0.01 at a = 2 |
+   | grain, amplitude a | neutral median R minus B | biased **up** by 0.9539a |
+
+   **The grain bias is derived, not fitted, and it matters beyond the corpus.**
+   `median(abs(R - B))` is an absolute difference, so zero-mean noise cannot
+   cancel and instead pushes it up. The difference of two independent channels
+   has standard deviation a times root two, and the median of the absolute value
+   of a zero-mean normal is 0.67449 of its standard deviation, giving 0.9539a.
+   Measured ratio of observed to predicted: 1.0021 at a = 2 and within half a
+   percent of unity through a = 16, which is convergence rather than a fit.
+
+   The consequence for shipped behaviour is worth stating plainly.
+   `presets/gates/interview.yaml` sets `whites_rb_balance` at 4.0 code values.
+   Grain at 2 code values contributes **1.91 of that on its own**, on a delivery
+   with no white balance error whatever. A noisy but correctly balanced delivery
+   therefore spends nearly half the gate budget before any real defect is
+   measured, and the gate cannot distinguish the two. That is a property of
+   measuring an absolute difference and not a bug, but a validated threshold has
+   to account for it or it is validating against noise.
+
+   **Letterbox needs a declared aperture, not a detector.** Bars are exactly
+   zero, so they own the low percentiles: measured on the reference chart with a
+   twelve percent matte, p1 luma reads 0.000 with bars included and 61.976
+   within the aperture, which is the unmatted reference's own p1 to the digit.
+   There is no reliable way to separate a matte from a photographed black
+   border, and guessing throws away a legitimately dark frame's blacks, so the
+   operator declares it and the report records the declaration.
+
    **Translation invariance is deliberately excluded, and saying why matters
    more than the exclusion.** An earlier draft required it. It cannot honestly
    be required while frozen masks are fixed 2D coordinates applied to every

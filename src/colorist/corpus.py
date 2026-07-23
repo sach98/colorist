@@ -1353,3 +1353,87 @@ def measure_delivery_floor(
         ceiling=predicted_quantisation_ceiling(resolved.pix_fmt, resolved.range),
         excluded_fraction=float(1.0 - interior.mean()),
     )
+
+
+# ---------------------------------------------------------------------------
+# Null cases, for validation property 7.
+#
+# These are changes that are NOT grading defects. The score must respond to them
+# according to a stated law, which after the pinned-ROI work above means an exact
+# law rather than a tolerance with a fudge factor in it.
+#
+# They are kept deliberately separate from the defect injectors, and named so
+# that a null can never be mistaken for a defect at a call site.
+# ---------------------------------------------------------------------------
+
+#: Grain amplitude, as a standard deviation in 8-bit code units, that the
+#: statistics are required to survive. Beyond this a statistic reports
+#: MEASUREMENT_INVALID rather than a number it cannot stand behind.
+GRAIN_AMPLITUDE_CODES: Final[float] = 2.0
+
+
+def add_grain(
+    image: np.ndarray, amplitude_codes: float = GRAIN_AMPLITUDE_CODES, *, seed: int = 0
+) -> np.ndarray:
+    """Add zero-mean Gaussian grain of a stated amplitude.
+
+    Seeded, because a corpus item has to be reproducible and an unseeded null
+    case would give a different answer every run, which is the opposite of what
+    a validation corpus is for.
+
+    Grain is the null case most likely to break a badly chosen statistic. A
+    within-region RANGE or a high percentile absorbs it directly; a median barely
+    moves, because noise is zero mean and a median is a rank statistic. That is
+    the measured reason the harness specification defines retained highlight
+    distinguishability on BETWEEN-bin median separation rather than within-bin
+    spread.
+    """
+    if amplitude_codes < 0:
+        raise CorpusError("grain amplitude must not be negative")
+    values = np.clip(np.asarray(image, dtype=np.float64), 0.0, 1.0)
+    generator = np.random.default_rng(seed)
+    noise = generator.normal(0.0, amplitude_codes / 255.0, size=values.shape)
+    return np.clip(values + noise, 0.0, 1.0)
+
+
+def add_letterbox(image: np.ndarray, bar_fraction: float = 0.12) -> np.ndarray:
+    """Add black bars top and bottom, as a matted delivery carries.
+
+    Returns the image only. The active aperture is a SEPARATE return from
+    ``active_aperture`` on purpose: an operator declares where the picture is, and
+    a corpus item that handed back a matted image without also handing back the
+    aperture would be inviting the caller to measure the bars.
+    """
+    if not 0.0 <= bar_fraction < 0.5:
+        raise CorpusError("bar_fraction must be at least 0 and below 0.5")
+    values = np.clip(np.asarray(image, dtype=np.float64), 0.0, 1.0).copy()
+    bar = int(round(bar_fraction * values.shape[0]))
+    if bar:
+        values[:bar] = 0.0
+        values[-bar:] = 0.0
+    return values
+
+
+def active_aperture(shape: tuple[int, int], bar_fraction: float = 0.12) -> np.ndarray:
+    """The declared picture area of a matted frame, excluding the bars.
+
+    DECLARED, not detected. The harness specification admits there is no
+    algorithm that reliably separates matte bars from photographed black borders,
+    and guessing is how a legitimately dark frame gets its blacks thrown away. So
+    the operator states the aperture and the report records the statement.
+
+    Why it matters numerically: bars are exactly zero, so on a matted frame they
+    dominate the low percentiles. Measured on the reference chart with a twelve
+    percent matte, p1 luma reads 0.000 with the bars included and 30.588 of an
+    8-bit code value with them excluded. A black placement dimension computed
+    over the bars measures the matte, not the grade.
+    """
+    height, width = shape
+    if not 0.0 <= bar_fraction < 0.5:
+        raise CorpusError("bar_fraction must be at least 0 and below 0.5")
+    aperture = np.ones((height, width), dtype=bool)
+    bar = int(round(bar_fraction * height))
+    if bar:
+        aperture[:bar] = False
+        aperture[-bar:] = False
+    return aperture

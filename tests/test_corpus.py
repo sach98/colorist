@@ -24,9 +24,13 @@ import numpy as np
 import pytest
 
 from colorist.corpus import (
+    GRAIN_AMPLITUDE_CODES,
     ChartLayout,
     CorpusError,
     Scene,
+    active_aperture,
+    add_grain,
+    add_letterbox,
     clipping_report,
     delivery_interior_mask,
     equal_distance_pair,
@@ -1198,3 +1202,104 @@ def test_the_delivery_floor_does_not_depend_on_edge_erosion(tmp_path) -> None:
         for margin in (0, 2, 4, 8)
     }
     assert max(readings.values()) - min(readings.values()) < 0.3, readings
+
+
+# ---------------------------------------------------------------------------
+# Null cases, for validation property 7.
+# ---------------------------------------------------------------------------
+
+
+def _p1_luma(image: np.ndarray, where: np.ndarray | None = None) -> float:
+    luma = image @ np.array([0.2126, 0.7152, 0.0722])
+    return float(np.percentile(luma if where is None else luma[where], 1) * 255)
+
+
+def test_a_declared_aperture_restores_a_matted_frame_exactly() -> None:
+    """Letterbox is only a null case if the bars are excluded, and exactly so.
+
+    Bars are exactly zero, so on a matted frame they own the low percentiles.
+    Measured on the reference chart with a twelve percent matte: p1 luma reads
+    0.000 with the bars included and 61.976 within the declared aperture, which
+    is the reference's own p1 luma to the digit. A black placement dimension
+    computed over the bars measures the matte, not the grade.
+    """
+    reference = render(Scene(layout=_grid()))
+    matted = add_letterbox(reference, 0.12)
+    aperture = active_aperture(reference.shape[:2], 0.12)
+
+    assert _p1_luma(matted) == pytest.approx(0.0, abs=1e-9)
+    assert _p1_luma(matted, aperture) == pytest.approx(_p1_luma(reference), abs=1e-9)
+
+
+def test_the_aperture_is_declared_and_not_detected() -> None:
+    """A legitimately dark frame must not have its blacks mistaken for a matte."""
+    reference = render(Scene(layout=_grid(), exposure=0.05))
+    # Nothing is matted here, so the full frame is the aperture.
+    full = active_aperture(reference.shape[:2], 0.0)
+    assert full.all()
+    with pytest.raises(CorpusError, match="bar_fraction"):
+        active_aperture(reference.shape[:2], 0.6)
+
+
+def test_grain_barely_moves_a_median_of_a_ratio() -> None:
+    """Skin saturation is a rank statistic over a ratio, so noise mostly cancels."""
+    reference = render(Scene(layout=_grid()))
+    pinned = reference_roi(reference, "skin")
+    baseline = masked_statistic(reference, pinned, "hsv_saturation_median")
+
+    grained = add_grain(reference, GRAIN_AMPLITUDE_CODES, seed=7)
+    assert abs(masked_statistic(grained, pinned, "hsv_saturation_median") - baseline) < 0.01
+
+
+def test_grain_biases_the_neutral_statistic_up_by_a_derived_amount() -> None:
+    """Not invariant, and the law is derived rather than fitted.
+
+    median(|R - B|) is an ABSOLUTE difference, so zero-mean noise cannot cancel:
+    it pushes the statistic UP. The difference of two independent channels has
+    standard deviation a*sqrt(2), and the median of the absolute value of a
+    zero-mean normal is 0.67449 of its standard deviation, so the statistic tends
+    to 0.9539 * a as noise comes to dominate the residual signal.
+
+    Measured, as the ratio of observed to predicted: 1.0569 at a = 0.5, 1.0162 at
+    1.0, 1.0021 at 2.0, and within half a percent of unity through a = 16. That
+    convergence is what distinguishes a confirmed mechanism from a fitted line.
+    """
+    from scipy.stats import norm
+
+    reference = render(Scene(layout=_grid()))
+    pinned = reference_roi(reference, "neutral")
+    coefficient = float(np.sqrt(2) * norm.ppf(0.75))
+
+    for amplitude in (2.0, 4.0, 8.0):
+        measured = masked_statistic(
+            add_grain(reference, amplitude, seed=7), pinned, "r_minus_b_median"
+        ) * 255
+        assert measured / (coefficient * amplitude) == pytest.approx(1.0, abs=0.02)
+
+
+def test_grain_alone_consumes_half_the_shipped_neutral_gate() -> None:
+    """The consequence of the above for real footage, not just the corpus.
+
+    presets/gates/interview.yaml sets whites_rb_balance at 4.0 code values. Grain
+    at the amplitude this corpus requires the statistics to survive contributes
+    1.91 of that on its own, on a delivery with no white balance error at all.
+    So a noisy but correctly balanced delivery spends nearly half the gate budget
+    before any real defect is measured, and the gate cannot tell the two apart.
+    """
+    reference = render(Scene(layout=_grid()))
+    pinned = reference_roi(reference, "neutral")
+    spurious = masked_statistic(
+        add_grain(reference, GRAIN_AMPLITUDE_CODES, seed=7), pinned, "r_minus_b_median"
+    ) * 255
+
+    assert masked_statistic(reference, pinned, "r_minus_b_median") * 255 < 0.1
+    assert 1.5 < spurious < 2.5
+    assert spurious > 0.4 * 4.0
+
+
+def test_grain_is_seeded_so_a_null_case_is_reproducible() -> None:
+    reference = render(Scene(layout=_grid()))
+    assert np.array_equal(add_grain(reference, 2.0, seed=3), add_grain(reference, 2.0, seed=3))
+    assert not np.array_equal(add_grain(reference, 2.0, seed=3), add_grain(reference, 2.0, seed=4))
+    with pytest.raises(CorpusError, match="must not be negative"):
+        add_grain(reference, -1.0)
