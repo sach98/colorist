@@ -925,3 +925,82 @@ def _invert_tone(display: np.ndarray, severity: float, injector: str) -> np.ndar
         np.exp2(expanded * log_span + np.log2(TONE_LOG_PEDESTAL)) - TONE_LOG_PEDESTAL
     )
     return bt1886_encode(np.clip(decoded, 0.0, 1.0))
+
+
+# ---------------------------------------------------------------------------
+# Pinned regions of interest.
+#
+# WHY A NULL CASE CANNOT BE STATED WITHOUT THIS
+#
+# Harness validation property 7 asks that the score not move under changes that
+# are not grading defects. The natural way to check that is to compute a
+# statistic on both members of a pair and compare. On a masked statistic that
+# does not work, and the reason is not obvious enough to leave implicit.
+#
+# ``measure._skin_mask`` gates on absolute HSV value between 0.25 and 0.95, and
+# ``measure._neutral_mask`` on absolute luma between 0.25 and 0.90. So a change
+# in exposure moves regions ACROSS those thresholds, and the statistic is then a
+# median over a different population. No per-pixel invariance law survives that,
+# however well behaved the pixels are.
+#
+# Measured on the ISO 17321-1 chart under D65, deriving the mask per image:
+#
+#     exposure   skin mask px   skin saturation median
+#         1.000            512                 0.362748
+#         0.250            512                 0.362748
+#         0.125            256                 0.318672
+#
+# The dark skin patch crosses SKIN_VALUE_MIN and leaves. Neutral is worse: under
+# illuminant A the statistic is not even monotonic, reading 14.03 code values at
+# full exposure, 11.19 at half and 17.67 at a quarter, RISING as the image gets
+# darker because a different set of patches passes the gates, and at an eighth
+# the mask is empty and the dimension is absent evidence.
+#
+# Four of the six scorecard dimensions are masked statistics, so all four inherit
+# this. The fix is to derive the region ONCE and apply it to both members of the
+# pair, which is what the frozen-ROI machinery in verify.py exists for. This is
+# the corpus-side helper for the same idea.
+# ---------------------------------------------------------------------------
+
+ROI_KINDS: Final[tuple[str, ...]] = ("skin", "neutral")
+
+
+def reference_roi(image: np.ndarray, kind: str) -> np.ndarray:
+    """Derive an ROI mask ONCE, from the reference member of a pair.
+
+    Pass the resulting mask to every other member. Deriving it per image is what
+    makes an invariance property untestable, because the mask then moves with the
+    thing being tested.
+    """
+    from colorist.measure import _neutral_mask, _skin_mask
+
+    if kind not in ROI_KINDS:
+        raise CorpusError(f"unknown ROI kind {kind!r}, expected one of {ROI_KINDS}")
+    selector = _skin_mask if kind == "skin" else _neutral_mask
+    return selector(np.clip(np.asarray(image, dtype=np.float64), 0.0, 1.0))
+
+
+def masked_statistic(image: np.ndarray, mask: np.ndarray, statistic: str) -> float:
+    """Compute one scorecard-style statistic through a SUPPLIED mask.
+
+    Returns NaN when the mask selects nothing, rather than a number. An empty
+    region is absent evidence and must not be reported as a measurement.
+    """
+    from colorist.measure import _rgb_to_hsv
+
+    values = np.clip(np.asarray(image, dtype=np.float64), 0.0, 1.0)
+    boolean = np.asarray(mask, dtype=bool)
+    if boolean.shape != values.shape[:2]:
+        raise CorpusError("mask shape does not match the image")
+    if not boolean.any():
+        return float("nan")
+
+    sampled = values[boolean]
+    if statistic == "hsv_saturation_median":
+        _, saturation, _ = _rgb_to_hsv(sampled)
+        return float(np.median(saturation))
+    if statistic == "r_minus_b_median":
+        return float(np.median(np.abs(sampled[:, 0] - sampled[:, 2])))
+    if statistic == "luma_median":
+        return float(np.median(sampled @ np.array([0.2126, 0.7152, 0.0722])))
+    raise CorpusError(f"unknown statistic {statistic!r}")

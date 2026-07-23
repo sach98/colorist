@@ -30,9 +30,11 @@ from colorist.corpus import (
     inject,
     illuminant_map,
     invert,
+    masked_statistic,
     patch_display_rgb,
     patch_map,
     recoverable_patches,
+    reference_roi,
     split_through_cell,
     write_scene,
     render,
@@ -800,3 +802,107 @@ def test_the_clipped_patch_exclusion_is_load_bearing(tmp_path) -> None:
     assert float(error[y0:y1, x0:x1].max()) * 255 > 0.5, (
         "cyan should be unrecoverable; if it is not, the reference stopped clipping"
     )
+
+
+# ---------------------------------------------------------------------------
+# Pinned regions of interest, for validation property 7.
+# ---------------------------------------------------------------------------
+
+
+def test_a_per_image_mask_breaks_the_statistic_it_is_supposed_to_measure() -> None:
+    """The defect that makes an unpinned invariance property untestable.
+
+    measure._skin_mask gates on absolute HSV value between 0.25 and 0.95, so
+    exposure moves regions ACROSS the threshold and the statistic becomes a
+    median over a different population. Measured: the skin mask holds 512 px at
+    exposures 1.0 through 0.25 and only 256 px at 0.125, where the dark skin
+    patch drops out, moving the saturation median by 0.044.
+    """
+    layout = _grid()
+    sizes, values = [], []
+    for exposure in (1.0, 0.25, 0.125):
+        image = render(Scene(layout=layout, illuminant="D65", exposure=exposure))
+        mask = reference_roi(image, "skin")
+        sizes.append(int(mask.sum()))
+        values.append(masked_statistic(image, mask, "hsv_saturation_median"))
+
+    assert sizes == [512, 512, 256], f"mask sizes {sizes}"
+    assert values[0] == pytest.approx(values[1], abs=1e-9)
+    assert abs(values[2] - values[0]) > 0.04, "the per-image mask should break here"
+
+
+def test_pinning_the_mask_makes_the_skin_statistic_exactly_invariant() -> None:
+    """HSV saturation is a ratio, so a uniform gain cannot move it.
+
+    That law only shows up once the mask stops moving. With the region derived
+    once from the reference, the statistic is identical at every exposure,
+    including the one where the per-image mask above lost a patch.
+    """
+    layout = _grid()
+    reference = render(Scene(layout=layout, illuminant="D65"))
+    pinned = reference_roi(reference, "skin")
+    baseline = masked_statistic(reference, pinned, "hsv_saturation_median")
+
+    for exposure in (1.0, 0.5, 0.25, 0.125):
+        image = render(Scene(layout=layout, illuminant="D65", exposure=exposure))
+        assert masked_statistic(image, pinned, "hsv_saturation_median") == pytest.approx(
+            baseline, abs=1e-9
+        )
+
+
+def test_pinning_makes_the_neutral_statistic_follow_an_exact_stated_law() -> None:
+    """Not invariance. A DIFFERENCE in display code scales, and by how much is exact.
+
+    bt1886_encode is a per-channel power law, so scaling scene linear by k scales
+    every display code by k**(1/2.4), and a difference of two codes scales with
+    them. Measured under illuminant A with the mask pinned, the relative error
+    against that prediction is at the 1e-16 level.
+
+    This is why validation property 7 must be stated as "the statistic follows
+    its declared law" rather than "the score must not move". Two statistics over
+    the same pinned region obey different laws: HSV saturation is a ratio and is
+    invariant, R minus B is a difference and scales.
+
+    Without pinning the same statistic is not merely off this law, it is
+    NON-MONOTONIC, reading 14.03 code values at full exposure, 11.19 at half and
+    17.67 at a quarter, and undefined at an eighth because the mask empties.
+    """
+    layout = _grid()
+    reference = render(Scene(layout=layout, illuminant="A"))
+    pinned = reference_roi(reference, "neutral")
+    baseline = masked_statistic(reference, pinned, "r_minus_b_median")
+
+    for exposure in (1.0, 0.5, 0.25, 0.125):
+        image = render(Scene(layout=layout, illuminant="A", exposure=exposure))
+        measured = masked_statistic(image, pinned, "r_minus_b_median")
+        assert measured == pytest.approx(baseline * exposure ** (1 / 2.4), rel=1e-9)
+
+
+def test_the_unpinned_neutral_statistic_is_non_monotonic_and_then_undefined() -> None:
+    """Pins the failure itself, so nobody re-derives masks per image by accident."""
+    layout = _grid()
+    readings = []
+    for exposure in (1.0, 0.5, 0.25, 0.125):
+        image = render(Scene(layout=layout, illuminant="A", exposure=exposure))
+        readings.append(
+            masked_statistic(image, reference_roi(image, "neutral"), "r_minus_b_median")
+        )
+
+    assert readings[2] > readings[1], "the quarter-exposure reading should RISE"
+    assert np.isnan(readings[3]), "the mask should empty at an eighth exposure"
+
+
+def test_an_empty_region_reports_nan_rather_than_a_number() -> None:
+    """Absent evidence is not a measurement, and must not be returned as one."""
+    layout = _grid()
+    image = render(Scene(layout=layout))
+    empty = np.zeros(image.shape[:2], dtype=bool)
+    assert np.isnan(masked_statistic(image, empty, "luma_median"))
+
+
+def test_unknown_roi_kinds_and_statistics_are_refused() -> None:
+    image = render(Scene(layout=_grid()))
+    with pytest.raises(CorpusError, match="unknown ROI kind"):
+        reference_roi(image, "foliage")
+    with pytest.raises(CorpusError, match="unknown statistic"):
+        masked_statistic(image, reference_roi(image, "skin"), "vibes")

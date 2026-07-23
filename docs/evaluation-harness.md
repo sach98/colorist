@@ -665,9 +665,27 @@ claimed to be sufficient.
    inherit this. The remedy is the frozen mask machinery that already exists:
    derive the ROI once from the authenticated source and stage it onto both
    members of an invariance pair, via `verify._stage_masks`, whose provenance
-   check was repaired in section 11 item 1. Where a mask cannot be pinned, the
-   null case must be restricted to a range in which no region crosses a
-   threshold, and that range computed and refused against rather than assumed.
+   check was repaired in section 11 item 1. `corpus.reference_roi` and
+   `corpus.masked_statistic` are the corpus-side helpers for the same rule.
+
+   **With the mask pinned, this property gets a much stronger form than "must
+   not move".** Each statistic then obeys an exact stated law, and the law is
+   not the same for every statistic:
+
+   | Statistic | Law under an exposure gain k | Measured agreement |
+   |---|---|---|
+   | HSV saturation median | invariant, because it is a ratio | exact |
+   | R minus B median | scales by k^(1/2.4), because it is a difference of display codes | relative error 1e-16 |
+
+   So property 7 is stated as **"the statistic follows its declared law"**, not
+   as "the score must not move materially". The second version needs a fudge
+   factor and hides the fact that some statistics are supposed to move. The
+   first is exact, and a design that asserted invariance for both of the above
+   would have been wrong about the second.
+
+   Where a mask cannot be pinned, the null case must be restricted to a range in
+   which no region crosses a threshold, and that range computed and refused
+   against rather than assumed.
 
    **Translation invariance is deliberately excluded, and saying why matters
    more than the exclusion.** An earlier draft required it. It cannot honestly
